@@ -1,0 +1,117 @@
+#!/bin/sh
+# os-stack [--list | <stack-name>]
+# ─────────────────────────────────────────────────────────────
+# Lists available stacks or switches the active stack in
+# openspec/config.yaml without opening an editor.
+# ─────────────────────────────────────────────────────────────
+set -e
+
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+
+os_load_config
+
+ARG="${1:-}"
+
+# ── List available stacks ────────────────────────────────────
+if [ "$ARG" = "--list" ] || [ "$ARG" = "-l" ] || [ -z "$ARG" ]; then
+  os_divider
+  os_label "  Available stacks (active: $OS_ACTIVE_STACK)"
+  os_divider
+  py -X utf8 - "$OS_CONFIG" << 'PYEOF'
+import sys, re
+
+with open(sys.argv[1], encoding="utf-8") as f:
+    lines = f.readlines()
+
+active = None
+for l in lines:
+    m = re.match(r'^stack:\s*["\']?([a-zA-Z0-9_-]+)["\']?\s*$', l)
+    if m:
+        active = m.group(1).strip()
+        break
+
+in_stacks = False
+for l in lines:
+    if re.match(r'^stacks:\s*$', l):
+        in_stacks = True
+        continue
+    if in_stacks:
+        if l.strip() and not l.startswith(' '):
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', l)
+        if m:
+            name = m.group(1)
+            marker = " <-- active" if name == active else ""
+            print(f"  {name}{marker}")
+PYEOF
+  os_divider
+  if [ -n "$ARG" ] && [ "$ARG" != "--list" ] && [ "$ARG" != "-l" ]; then
+    : # fall through to switch
+  else
+    os_info "Usage: os-stack <stack-name>"
+    os_info "       os-stack --list"
+    exit 0
+  fi
+fi
+
+# ── Switch active stack ──────────────────────────────────────
+NEW_STACK="$ARG"
+
+# Validate stack exists in config
+VALID=$(py -X utf8 - "$OS_CONFIG" "$NEW_STACK" << 'PYEOF'
+import sys, re
+
+config_path, target = sys.argv[1], sys.argv[2]
+with open(config_path, encoding="utf-8") as f:
+    lines = f.readlines()
+
+in_stacks = False
+for l in lines:
+    if re.match(r'^stacks:\s*$', l):
+        in_stacks = True
+        continue
+    if in_stacks:
+        if l.strip() and not l.startswith(' '):
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', l)
+        if m and m.group(1) == target:
+            print("valid")
+            sys.exit(0)
+
+print("invalid")
+PYEOF
+)
+
+if [ "$VALID" != "valid" ]; then
+  os_error "Stack '$NEW_STACK' not found in openspec/config.yaml"
+  os_info  "Run 'os-stack --list' to see available stacks"
+  exit 1
+fi
+
+# Update config.yaml
+py -X utf8 - "$OS_CONFIG" "$NEW_STACK" << 'PYEOF'
+import sys, re
+
+config_path, new_stack = sys.argv[1], sys.argv[2]
+
+with open(config_path, encoding="utf-8") as f:
+    content = f.read()
+
+updated = re.sub(
+    r'^(stack:\s*)["\']?[a-zA-Z0-9_-]+["\']?',
+    f'\\g<1>{new_stack}',
+    content,
+    count=1,
+    flags=re.MULTILINE
+)
+
+with open(config_path, 'w', newline='\n') as f:
+    f.write(updated)
+
+print(f"switched to: {new_stack}")
+PYEOF
+
+os_success "Active stack switched to: $NEW_STACK"
+os_info    "Run 'os-plan <TICKET-ID>' to use the new stack."

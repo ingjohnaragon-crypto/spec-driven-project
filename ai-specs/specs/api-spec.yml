@@ -1,0 +1,116 @@
+openapi: 3.0.3
+info:
+  title: OpenSpec Base API
+  version: 0.1.0
+  description: Base FastAPI template for OpenSpec projects
+paths:
+  /api/v1/health/:
+    get:
+      summary: List health records
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/HealthResponse'
+    post:
+      summary: Create a health record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthRequest'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/v1/health/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Get a health record by ID
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '404':
+          description: Not found
+    put:
+      summary: Update a health record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/HealthRequest'
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '404':
+          description: Not found
+    delete:
+      summary: Delete a health record
+      responses:
+        '204':
+          description: No Content
+        '404':
+          description: Not found
+components:
+  schemas:
+    HealthRequest:
+      type: object
+      required:
+        - service_name
+        - status
+        - version
+      properties:
+        service_name:
+          type: string
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+        version:
+          type: string
+    HealthResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        service_name:
+          type: string
+        status:
+          type: string
+          enum:
+            - healthy
+            - degraded
+            - unhealthy
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        uptime_seconds:
+          type: integer

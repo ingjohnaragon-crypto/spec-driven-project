@@ -1,181 +1,70 @@
 schema: spec-driven
 
-# ─────────────────────────────────────────────
-# ACTIVE STACK
-# Change this value to switch the active stack.
-# Must match one of the keys defined under "stacks:" below.
-# ─────────────────────────────────────────────
 stack: python-fastapi
-# ─────────────────────────────────────────────
-# STACK REGISTRY
-# Each key defines a supported stack with its
-# tooling commands, agent, and standards file.
-# ─────────────────────────────────────────────
+
 stacks:
   java-spring:
-    label: "Java 17 + Spring Boot"
-    build_command: "./gradlew build"
-    test_command: "./gradlew test"
-    run_command: "./gradlew bootRun"
-    lint_command: "./gradlew checkstyleMain"
-    coverage_command: "./gradlew test jacocoTestReport"
-    agent: "ai-specs/.agents/stacks/java-spring.md"
-    standards: "ai-specs/specs/stacks/java-spring-standards.mdc"
+    label: Java 17 + Spring Boot
+    build_command: ./gradlew build
+    test_command: ./gradlew test
+    run_command: ./gradlew bootRun
+    lint_command: ./gradlew checkstyleMain
+    coverage_command: ./gradlew test jacocoTestReport
+    agent: ai-specs/.agents/stacks/java-spring.md
+    standards: ai-specs/specs/stacks/java-spring-standards.mdc
 
   node-express:
-    label: "Node.js + Express"
-    build_command: "npm run build"
-    test_command: "npm test"
-    run_command: "npm run dev"
-    lint_command: "npm run lint"
-    coverage_command: "npm run test:coverage"
-    agent: "ai-specs/.agents/stacks/node-express.md"
-    standards: "ai-specs/specs/stacks/node-express-standards.mdc"
+    label: Node.js + Express
+    build_command: npm run build
+    test_command: npm test
+    run_command: npm run dev
+    lint_command: npm run lint
+    coverage_command: npm run test:coverage
+    agent: ai-specs/.agents/stacks/node-express.md
+    standards: ai-specs/specs/stacks/node-express-standards.mdc
 
   python-fastapi:
-    label: "Python 3.12 + FastAPI"
-    build_command: "pip install -r requirements.txt"
-    test_command: "pytest"
-    run_command: "uvicorn main:app --reload"
-    lint_command: "ruff check ."
-    coverage_command: "pytest --cov --cov-report=html"
-    agent: "ai-specs/.agents/stacks/python-fastapi.md"
-    standards: "ai-specs/specs/stacks/python-fastapi-standards.mdc"
+    label: Python 3.12 + FastAPI
+    build_command: pip install -r requirements.txt
+    test_command: pytest
+    run_command: uvicorn main:app --reload
+    lint_command: ruff check .
+    coverage_command: pytest --cov --cov-report=html
+    agent: ai-specs/.agents/stacks/python-fastapi.md
+    standards: ai-specs/specs/stacks/python-fastapi-standards.mdc
 
   go-gin:
-    label: "Go + Gin"
-    build_command: "go build ./..."
-    test_command: "go test ./..."
-    run_command: "go run main.go"
-    lint_command: "golangci-lint run"
-    coverage_command: "go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out"
-    agent: "ai-specs/.agents/stacks/go-gin.md"
-    standards: "ai-specs/specs/stacks/go-gin-standards.mdc"
+    label: Go + Gin
+    build_command: go build ./...
+    test_command: go test ./...
+    run_command: go run main.go
+    lint_command: golangci-lint run
+    coverage_command: go test -coverprofile=coverage.out ./...
+    agent: ai-specs/.agents/stacks/go-gin.md
+    standards: ai-specs/specs/stacks/go-gin-standards.mdc
 
   frontend-angular:
-    label: "Angular"
-    build_command: "ng build"
-    test_command: "ng test --watch=false"
-    run_command: "ng serve"
-    lint_command: "ng lint"
-    coverage_command: "ng test --code-coverage --watch=false"
-    agent: "ai-specs/.agents/stacks/frontend-angular.md"
-    standards: "ai-specs/specs/stacks/frontend-angular-standards.mdc"
+    label: Angular
+    build_command: ng build
+    test_command: ng test --watch=false
+    run_command: ng serve
+    lint_command: ng lint
+    coverage_command: ng test --code-coverage --watch=false
+    agent: ai-specs/.agents/stacks/frontend-angular.md
+    standards: ai-specs/specs/stacks/frontend-angular-standards.mdc
 
   frontend-react:
-    label: "React + Vite"
-    build_command: "npm run build"
-    test_command: "npm test"
-    run_command: "npm run dev"
-    lint_command: "npm run lint"
-    coverage_command: "npm run test:coverage"
-    agent: "ai-specs/.agents/stacks/frontend-react.md"
-    standards: "ai-specs/specs/stacks/frontend-react-standards.mdc"
+    label: React + Vite
+    build_command: npm run build
+    test_command: npm test
+    run_command: npm run dev
+    lint_command: npm run lint
+    coverage_command: npm run test:coverage
+    agent: ai-specs/.agents/stacks/frontend-react.md
+    standards: ai-specs/specs/stacks/frontend-react-standards.mdc
 
-# ─────────────────────────────────────────────
-# JIRA INTEGRATION
-# Set JIRA_BASE_URL, JIRA_EMAIL and JIRA_TOKEN
-# as environment variables. Never commit secrets.
-# ─────────────────────────────────────────────
 jira:
   base_url: ${JIRA_BASE_URL}
   email: ${JIRA_EMAIL}
   token: ${JIRA_TOKEN}
   project_key: KAN
-
-# ─────────────────────────────────────────────
-# PROJECT CONTEXT
-# Injected into every agent prompt automatically.
-# Stack-specific context lives in each stack's
-# agent file under ai-specs/.agents/stacks/.
-# ─────────────────────────────────────────────
-context: |
-  Domain: OpenSpec — spec-driven AI development platform
-  Architecture: Clean Architecture with Domain, Application, and Presentation layers following Domain-Driven Design (DDD)
-  All code, comments, documentation, and technical artifacts must be written in English.
-
-  The active stack is defined by the "stack:" key above.
-  Stack-specific tooling, conventions, and standards are loaded from the corresponding
-  entry in "stacks:" and the agent/standards files it references.
-
-  Project specs (single source of truth):
-  - ai-specs/specs/base-standards.mdc            — core principles, TDD, language standards
-  - ai-specs/specs/documentation-standards.mdc   — docs structure and maintenance
-  - ai-specs/specs/api-spec.yml                  — API contracts and endpoint definitions
-  - ai-specs/specs/data-model.md                 — entity model and migration scripts
-  - ai-specs/specs/stacks/<active-stack>-standards.mdc — stack-specific conventions (resolved at runtime)
-
-  For implementation: adopt the agent from ai-specs/.agents/stacks/<active-stack>.md
-  For workflow: use ai-specs/.commands/ (e.g. develop-backend.md, plan-backend-ticket.md)
-
-# ─────────────────────────────────────────────
-# PER-ARTIFACT RULES
-# ─────────────────────────────────────────────
-rules:
-  _global:
-    - Before creating any artifact, read ai-specs/specs/base-standards.mdc
-    - Resolve the active stack from openspec/config.yaml "stack:" key
-    - Load the stack agent from the resolved "agent:" path under "stacks:"
-    - Load the stack standards from the resolved "standards:" path under "stacks:"
-    - Use ai-specs/specs/api-spec.yml and ai-specs/specs/data-model.md for API and data consistency
-    - All schema changes must be implemented as migration scripts (location defined per stack standards)
-    - Never use ORM auto-migration in production environments
-
-  tasks:
-    - Break tasks into chunks of max 2 hours
-    - For backend changes, follow the backend implementation plan structure in ai-specs/.commands/plan-backend-ticket.md
-    - All backend tasks must include mandatory steps: |
-        Create Feature Branch,
-        Write/Update Unit Tests (TDD - tests before implementation),
-        Run Full Test Suite,
-        Manual Endpoint Testing,
-        Documentation Update
-
-  spec:
-    - When creating implementation plans or specs, follow the Backend Implementation Plan Template Structure
-    - All plans must include these MANDATORY sections: |
-        1. Header with ticket ID and feature name
-        2. Overview with architecture principles
-        3. Architecture Context (layers involved)
-        4. Implementation Steps (must start with Step 0: Create Feature Branch)
-        5. Implementation Order (numbered list)
-        6. Testing Checklist with mandatory validations
-        7. Error Response Format (JSON structure + HTTP status code mapping)
-        8. Dependencies (new libraries required, if any)
-        9. Notes
-        10. Next Steps After Implementation
-        11. Implementation Verification Checklist
-
-  backend:
-    - Adopt the role defined in the active stack agent file
-    - Apply the architecture principles defined in the active stack standards file
-    - All implementation must follow TDD (write tests before code)
-    - Branch naming: feature/[ticket-id]-backend (required)
-
-    - MANDATORY steps in all backend implementation plans:
-        - Step 0: Create Feature Branch (must be FIRST)
-        - Step N: Write Unit Tests BEFORE implementation (TDD)
-        - Step N+1: Implement feature to make tests pass
-        - Step N+2: Run Full Test Suite and verify coverage >= 90%
-        - Step N+3: Manual Endpoint Testing
-        - Step N+4: Update Technical Documentation
-
-    - Error response format (JSON):
-        {
-          "success": false,
-          "code": "ERROR_CODE",
-          "message": "Human-readable description",
-          "details": ["field: validation message"]
-        }
-        HTTP mapping:
-          400 - VALIDATION_ERROR
-          404 - NOT_FOUND
-          409 - CONFLICT
-          422 - BUSINESS_RULE_VIOLATION
-          500 - INTERNAL_ERROR
-
-    - Documentation requirements:
-        - Schema / entity changes -> Update ai-specs/specs/data-model.md
-        - API endpoint changes   -> Update ai-specs/specs/api-spec.yml
-        - Standards changes      -> Update relevant *-standards.mdc files
-        - All documentation must be written in English
