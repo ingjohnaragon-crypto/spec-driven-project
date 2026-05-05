@@ -117,26 +117,14 @@ Write everything in English.
 PROMPT_EOF
 )
 
-# ── Copy to clipboard ────────────────────────────────────────
-CLIPBOARD_OK=0
-if command -v pbcopy > /dev/null 2>&1; then
-  echo "$PROMPT" | pbcopy && CLIPBOARD_OK=1
-elif command -v xclip > /dev/null 2>&1; then
-  echo "$PROMPT" | xclip -selection clipboard && CLIPBOARD_OK=1
-elif command -v xsel > /dev/null 2>&1; then
-  echo "$PROMPT" | xsel --clipboard --input && CLIPBOARD_OK=1
-fi
-
+# ── Save and deliver prompt via active agent ─────────────────
+. "$HOME/.openspec/lib/agent.sh"
+os_load_agent
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 echo "$PROMPT" > "$PROMPT_FILE"
 
 # ── Summary ──────────────────────────────────────────────────
 os_divider
-if [ "$CLIPBOARD_OK" = "1" ]; then
-  os_success "Enrichment prompt copied to clipboard!"
-else
-  os_info "Prompt saved to: $PROMPT_FILE"
-fi
 os_divider
 os_label "  Next steps:"
 os_info  "1. Paste the prompt into Copilot Chat"
@@ -144,4 +132,5 @@ os_info  "2. Copy Copilot's [enhanced] output"
 os_info  "3. Paste it into the Jira ticket description"
 os_info  "     (after the [original] section)"
 os_info  "4. Optional: update ticket status in Jira manually"
+os_deliver_prompt "$PROMPT_FILE"
 os_divider

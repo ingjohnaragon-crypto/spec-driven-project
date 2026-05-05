@@ -212,24 +212,12 @@ If requesting changes, list the blocking issues clearly."
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
-# ── Copy to clipboard ────────────────────────────────────────
-CLIPBOARD_OK=0
-if command -v clip.exe > /dev/null 2>&1; then
-  printf '%s' "$PROMPT" | clip.exe && CLIPBOARD_OK=1
-elif command -v pbcopy > /dev/null 2>&1; then
-  printf '%s' "$PROMPT" | pbcopy && CLIPBOARD_OK=1
-elif command -v xclip > /dev/null 2>&1; then
-  printf '%s' "$PROMPT" | xclip -selection clipboard && CLIPBOARD_OK=1
-fi
+# ── Save and deliver prompt via active agent ─────────────────
+. "$HOME/.openspec/lib/agent.sh"
+os_load_agent
 
 # ── Summary ──────────────────────────────────────────────────
 os_divider
-if [ "$CLIPBOARD_OK" = "1" ]; then
-  os_success "Review prompt copied to clipboard!"
-else
-  os_info "Prompt saved to: $PROMPT_FILE"
-  os_info "Copy manually: cat .openspec-cli/.last-prompt.md | clip"
-fi
 os_divider
 os_label "  Next steps:"
 os_info  "1. Paste the prompt into Copilot Chat in VS Code"
@@ -237,4 +225,5 @@ os_info  "2. Copilot will generate a structured code review"
 os_info  "3. Save Copilot output to: .openspec-cli/.review-output.md"
 os_info  "4. Then publish to GitHub:"
 os_info  "   os-review-apply $PR_NUMBER"
+os_deliver_prompt "$PROMPT_FILE"
 os_divider

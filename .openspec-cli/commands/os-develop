@@ -145,30 +145,19 @@ $COMMAND_TEMPLATE
 PROMPT_EOF
 )
 
-# ── Copy to clipboard ────────────────────────────────────────
-CLIPBOARD_OK=0
-if command -v pbcopy > /dev/null 2>&1; then
-  echo "$PROMPT" | pbcopy && CLIPBOARD_OK=1
-elif command -v xclip > /dev/null 2>&1; then
-  echo "$PROMPT" | xclip -selection clipboard && CLIPBOARD_OK=1
-elif command -v xsel > /dev/null 2>&1; then
-  echo "$PROMPT" | xsel --clipboard --input && CLIPBOARD_OK=1
-fi
-
+# ── Save and deliver prompt via active agent ─────────────────
+. "$HOME/.openspec/lib/agent.sh"
+os_load_agent
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 echo "$PROMPT" > "$PROMPT_FILE"
 
 # ── Summary ──────────────────────────────────────────────────
 os_divider
-if [ "$CLIPBOARD_OK" = "1" ]; then
-  os_success "Implementation prompt copied to clipboard!"
-else
-  os_info "Prompt saved to: $PROMPT_FILE"
-fi
 os_divider
 os_label "  Next steps:"
 os_info  "1. Paste the prompt into Copilot Chat (VS Code)"
 os_info  "2. Copilot will implement the ticket step by step"
 os_info  "3. Review the changes, then run:"
 os_info  "   os-commit $TICKET_ID"
+os_deliver_prompt "$PROMPT_FILE"
 os_divider

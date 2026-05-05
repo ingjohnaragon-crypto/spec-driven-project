@@ -1,37 +1,38 @@
 #!/bin/sh
 # os-plan <TICKET-ID>
 # ─────────────────────────────────────────────────────────────
-# Fetches a Jira ticket, resolves the active stack, and builds
-# a full Copilot prompt to generate the backend implementation plan.
-# The prompt is copied to the clipboard and optionally saved to a file.
+# Fetches a Jira ticket, resolves the active stack and agent,
+# and delivers the implementation plan prompt accordingly.
 # ─────────────────────────────────────────────────────────────
 set -e
 
 TICKET_ID="${1:-}"
 CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-# Load helpers
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
+. "$CLI_DIR/lib/agent.sh"
 
-# ── Usage ────────────────────────────────────────────────────
 if [ -z "$TICKET_ID" ]; then
   os_error "Usage: os-plan <TICKET-ID>  (e.g. os-plan KAN-42)"
   exit 1
 fi
 
-# ── Load project config ──────────────────────────────────────
+# ── Load config and agent ────────────────────────────────────
 os_load_config
 os_load_env
+os_load_agent
+
 os_print_config
+os_print_agent
 
 # ── Fetch Jira ticket ────────────────────────────────────────
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
 
-# ── Read context files ───────────────────────────────────────
+# ── Load stack context ───────────────────────────────────────
 os_step "Loading stack agent and standards..."
 
 AGENT_CONTENT=""
@@ -50,106 +51,70 @@ fi
 
 BASE_STANDARDS=""
 BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
-if [ -f "$BASE_FILE" ]; then
-  BASE_STANDARDS=$(cat "$BASE_FILE")
-fi
+[ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
 
 COMMAND_TEMPLATE=""
 CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/plan-backend-ticket.md"
 if [ -f "$CMD_FILE" ]; then
-  COMMAND_TEMPLATE=$(cat "$CMD_FILE")
+  COMMAND_TEMPLATE=$(cat "$CMD_FILE" \
+    | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
+    | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
+    | sed "s|\$ARGUMENTS|$TICKET_ID|g")
 fi
 
-# ── Resolve {{placeholders}} in command template ─────────────
-COMMAND_TEMPLATE=$(echo "$COMMAND_TEMPLATE" \
-  | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
-  | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
-  | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
-  | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
-  | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
-  | sed "s|\$ARGUMENTS|$TICKET_ID|g")
-
 # ── Build prompt ─────────────────────────────────────────────
-os_step "Building Copilot prompt..."
+os_step "Building prompt..."
 
-PROMPT=$(cat << PROMPT_EOF
-You are acting as the backend-developer agent for an openspec project.
+PROMPT="You are acting as the backend-developer agent for an openspec project.
 
 ## Active Stack
-Stack: $OS_ACTIVE_STACK
-Label: $OS_STACK_LABEL
-Build: $OS_BUILD_CMD
-Test: $OS_TEST_CMD
-Run: $OS_RUN_CMD
-Coverage: $OS_COVERAGE_CMD
+Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Build    : $OS_BUILD_CMD
+Test     : $OS_TEST_CMD
+Run      : $OS_RUN_CMD
+Coverage : $OS_COVERAGE_CMD
 
 ## Jira Ticket: $JIRA_TICKET_ID
-Type: $JIRA_TYPE
-Status: $JIRA_STATUS
-Summary: $JIRA_SUMMARY
-Assignee: $JIRA_ASSIGNEE
+Type     : $JIRA_TYPE
+Status   : $JIRA_STATUS
+Summary  : $JIRA_SUMMARY
+Assignee : $JIRA_ASSIGNEE
 
 ### Description
 $JIRA_DESCRIPTION
 
 ---
 
-## Base Standards (apply always)
+## Base Standards
 $BASE_STANDARDS
 
 ---
 
-## Stack Agent (your role for this task)
+## Stack Agent (your role)
 $AGENT_CONTENT
 
 ---
 
-## Stack Standards (conventions to follow)
+## Stack Standards
 $STANDARDS_CONTENT
 
 ---
 
 ## Your Task
-$COMMAND_TEMPLATE
-PROMPT_EOF
-)
+$COMMAND_TEMPLATE"
 
-# ── Copy to clipboard ────────────────────────────────────────
-os_step "Copying prompt to clipboard..."
-
-CLIPBOARD_OK=0
-if command -v pbcopy > /dev/null 2>&1; then
-  echo "$PROMPT" | pbcopy
-  CLIPBOARD_OK=1
-elif command -v xclip > /dev/null 2>&1; then
-  echo "$PROMPT" | xclip -selection clipboard
-  CLIPBOARD_OK=1
-elif command -v xsel > /dev/null 2>&1; then
-  echo "$PROMPT" | xsel --clipboard --input
-  CLIPBOARD_OK=1
-else
-  os_warn "No clipboard tool found (pbcopy / xclip / xsel). Saving to file instead."
-fi
-
-# ── Save prompt to file (always) ─────────────────────────────
+# ── Save and deliver prompt ──────────────────────────────────
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
-echo "$PROMPT" > "$PROMPT_FILE"
+printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
-# ── Summary ──────────────────────────────────────────────────
-os_divider
-if [ "$CLIPBOARD_OK" = "1" ]; then
-  os_success "Prompt copied to clipboard!"
-  os_info    "Paste it into Copilot Chat in VS Code (#file context recommended)"
-else
-  os_info    "Prompt saved to: $PROMPT_FILE"
-  os_info    "Open that file and paste its contents into Copilot Chat."
-fi
-os_divider
-os_label "  Next steps:"
-os_info  "1. Open Copilot Chat in VS Code"
-os_info  "2. Paste the prompt (Cmd+V / Ctrl+V)"
-os_info  "3. Copilot will generate the plan at:"
-os_info  "   ai-specs/changes/${TICKET_ID}_backend.md"
-os_info  "4. Review the plan, then run:"
-os_info  "   os-develop $TICKET_ID"
-os_divider
+NEXT_STEPS="1. Open $OS_AGENT_LABEL
+2. Paste the prompt
+3. The AI will generate the plan at:
+   ai-specs/changes/${TICKET_ID}_backend.md
+4. Review the plan, then run:
+   os-develop $TICKET_ID"
+
+os_deliver_prompt "$PROMPT_FILE" "$NEXT_STEPS"

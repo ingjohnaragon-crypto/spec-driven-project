@@ -26,7 +26,7 @@ os_load_config() {
   OS_PYTHON="$(_os_find_python 2>/dev/null || true)"
   PARSER="$HOME/.openspec/lib/parse_config.py"
   result=$($OS_PYTHON "$PARSER" "$OS_CONFIG" 2>/dev/null)
-  OS_ACTIVE_STACK=$(grep "^stack:" "$OS_CONFIG" | head -1 | sed "s/^stack:[[:space:]]*//" | tr -d "")
+  OS_ACTIVE_STACK=$($OS_PYTHON "$HOME/.openspec/lib/parse_stack.py" "$OS_CONFIG" 2>/dev/null)
   OS_STACK_LABEL=$(echo "$result"   | grep "^label="            | cut -d= -f2-)
   OS_BUILD_CMD=$(echo "$result"     | grep "^build_command="    | cut -d= -f2-)
   OS_TEST_CMD=$(echo "$result"      | grep "^test_command="     | cut -d= -f2-)
