@@ -1,0 +1,147 @@
+#!/bin/sh
+# os-enrich <TICKET-ID>
+# ─────────────────────────────────────────────────────────────
+# Fetches a Jira ticket and builds a Copilot prompt to enrich
+# it with technical detail (endpoints, files, steps, NFRs).
+# The enriched content is ready to paste back into Jira.
+# ─────────────────────────────────────────────────────────────
+set -e
+
+TICKET_ID="${1:-}"
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/jira.sh"
+
+if [ -z "$TICKET_ID" ]; then
+  os_error "Usage: os-enrich <TICKET-ID>  (e.g. os-enrich KAN-42)"
+  exit 1
+fi
+
+# ── Load config ──────────────────────────────────────────────
+os_load_config
+os_load_env
+os_print_config
+
+# ── Fetch ticket ─────────────────────────────────────────────
+os_require_jira_env
+os_jira_fetch_ticket "$TICKET_ID"
+os_jira_print_ticket
+
+# ── Load context ─────────────────────────────────────────────
+AGENT_CONTENT=""
+[ -f "$OS_AGENT_PATH" ] && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
+
+STANDARDS_CONTENT=""
+[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
+
+API_SPEC=""
+API_FILE="$OS_REPO_ROOT/ai-specs/specs/api-spec.yml"
+[ -f "$API_FILE" ] && API_SPEC=$(cat "$API_FILE")
+
+DATA_MODEL=""
+DM_FILE="$OS_REPO_ROOT/ai-specs/specs/data-model.md"
+[ -f "$DM_FILE" ] && DATA_MODEL=$(cat "$DM_FILE")
+
+ENRICH_TEMPLATE=""
+CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/enrich-us.md"
+[ -f "$CMD_FILE" ] && ENRICH_TEMPLATE=$(cat "$CMD_FILE" \
+  | sed "s|\$ARGUMENTS|$TICKET_ID|g")
+
+# ── Build prompt ─────────────────────────────────────────────
+os_step "Building enrichment prompt..."
+
+PROMPT=$(cat << PROMPT_EOF
+You are acting as a product expert with technical knowledge for an openspec project.
+Your task is to enrich the following Jira ticket with the technical detail a developer
+needs to be fully autonomous — no back-and-forth required.
+
+## Active Stack
+Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Jira Ticket: $JIRA_TICKET_ID
+Type    : $JIRA_TYPE
+Status  : $JIRA_STATUS
+Summary : $JIRA_SUMMARY
+Assignee: $JIRA_ASSIGNEE
+
+### Original Description
+$JIRA_DESCRIPTION
+
+---
+
+## Stack Agent (technical context)
+$AGENT_CONTENT
+
+---
+
+## Stack Standards
+$STANDARDS_CONTENT
+
+---
+
+## Current API Spec
+$API_SPEC
+
+---
+
+## Current Data Model
+$DATA_MODEL
+
+---
+
+## Your Task
+$ENRICH_TEMPLATE
+
+---
+
+## Output Instructions
+Produce two clearly separated sections:
+
+### [original]
+Reproduce the original description verbatim — do not change it.
+
+### [enhanced]
+Write an improved, technically detailed version that includes:
+- Full description of the functionality
+- Comprehensive list of fields to create or update
+- Endpoint URLs, HTTP methods, request/response shapes
+- Files to create or modify (with their layer in the architecture)
+- Acceptance criteria / steps to consider the task complete
+- Unit test cases to cover
+- Non-functional requirements (security, performance, validation rules)
+
+Use markdown formatting (headers, bullet lists, code blocks where helpful).
+Write everything in English.
+PROMPT_EOF
+)
+
+# ── Copy to clipboard ────────────────────────────────────────
+CLIPBOARD_OK=0
+if command -v pbcopy > /dev/null 2>&1; then
+  echo "$PROMPT" | pbcopy && CLIPBOARD_OK=1
+elif command -v xclip > /dev/null 2>&1; then
+  echo "$PROMPT" | xclip -selection clipboard && CLIPBOARD_OK=1
+elif command -v xsel > /dev/null 2>&1; then
+  echo "$PROMPT" | xsel --clipboard --input && CLIPBOARD_OK=1
+fi
+
+PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
+echo "$PROMPT" > "$PROMPT_FILE"
+
+# ── Summary ──────────────────────────────────────────────────
+os_divider
+if [ "$CLIPBOARD_OK" = "1" ]; then
+  os_success "Enrichment prompt copied to clipboard!"
+else
+  os_info "Prompt saved to: $PROMPT_FILE"
+fi
+os_divider
+os_label "  Next steps:"
+os_info  "1. Paste the prompt into Copilot Chat"
+os_info  "2. Copy Copilot's [enhanced] output"
+os_info  "3. Paste it into the Jira ticket description"
+os_info  "     (after the [original] section)"
+os_info  "4. Optional: update ticket status in Jira manually"
+os_divider

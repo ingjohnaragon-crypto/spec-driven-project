@@ -1,0 +1,174 @@
+#!/bin/sh
+# os-develop <TICKET-ID>
+# ─────────────────────────────────────────────────────────────
+# Creates the feature branch, fetches the Jira ticket, loads the
+# existing plan (if any), and builds the Copilot implementation prompt.
+# ─────────────────────────────────────────────────────────────
+set -e
+
+TICKET_ID="${1:-}"
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/jira.sh"
+
+if [ -z "$TICKET_ID" ]; then
+  os_error "Usage: os-develop <TICKET-ID>  (e.g. os-develop KAN-42)"
+  exit 1
+fi
+
+# ── Load config ──────────────────────────────────────────────
+os_load_config
+os_load_env
+os_print_config
+
+# ── Fetch Jira ticket ────────────────────────────────────────
+os_require_jira_env
+os_jira_fetch_ticket "$TICKET_ID"
+os_jira_print_ticket
+
+# ── Create / switch to feature branch ───────────────────────
+BRANCH="feature/${TICKET_ID}-backend"
+os_step "Setting up branch: $BRANCH"
+
+cd "$OS_REPO_ROOT"
+
+# Determine default branch
+DEFAULT_BRANCH=$(git remote show origin 2>/dev/null \
+  | grep "HEAD branch" | awk '{print $NF}')
+DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
+
+if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  os_info "Branch $BRANCH already exists — switching to it"
+  git checkout "$BRANCH"
+else
+  os_info "Pulling latest $DEFAULT_BRANCH..."
+  git checkout "$DEFAULT_BRANCH" && git pull origin "$DEFAULT_BRANCH"
+  os_info "Creating branch $BRANCH..."
+  git checkout -b "$BRANCH"
+fi
+
+os_success "On branch: $BRANCH"
+
+# ── Load context files ───────────────────────────────────────
+os_step "Loading stack agent and standards..."
+
+AGENT_CONTENT=""
+[ -f "$OS_AGENT_PATH" ] && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
+
+STANDARDS_CONTENT=""
+[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
+
+BASE_STANDARDS=""
+BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
+[ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
+
+# ── Load existing plan if present ───────────────────────────
+PLAN_FILE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
+PLAN_CONTENT=""
+if [ -f "$PLAN_FILE" ]; then
+  os_success "Found existing plan: $PLAN_FILE"
+  PLAN_CONTENT=$(cat "$PLAN_FILE")
+  PLAN_SECTION="## Existing Implementation Plan
+The following plan was already generated for this ticket. Follow it exactly.
+
+$PLAN_CONTENT"
+else
+  os_warn "No plan found at $PLAN_FILE"
+  os_warn "Run 'os-plan $TICKET_ID' first to generate the plan, then come back."
+  PLAN_SECTION="## No Plan Found
+No implementation plan exists yet for $TICKET_ID.
+Before implementing, generate one by running: os-plan $TICKET_ID
+Then review it and come back to this step."
+fi
+
+# ── Load develop-backend command template ─────────────────
+COMMAND_TEMPLATE=""
+CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/develop-backend.md"
+if [ -f "$CMD_FILE" ]; then
+  COMMAND_TEMPLATE=$(cat "$CMD_FILE" \
+    | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
+    | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
+    | sed "s|\$ARGUMENTS|$TICKET_ID|g")
+fi
+
+# ── Build prompt ─────────────────────────────────────────────
+os_step "Building Copilot implementation prompt..."
+
+PROMPT=$(cat << PROMPT_EOF
+You are acting as the backend-developer agent for an openspec project.
+You are now on branch: $BRANCH
+Your task is to IMPLEMENT the following Jira ticket following the plan below.
+
+## Active Stack
+Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Build command    : $OS_BUILD_CMD
+Test command     : $OS_TEST_CMD
+Run command      : $OS_RUN_CMD
+Coverage command : $OS_COVERAGE_CMD
+
+## Jira Ticket: $JIRA_TICKET_ID
+Type    : $JIRA_TYPE
+Status  : $JIRA_STATUS
+Summary : $JIRA_SUMMARY
+
+### Description
+$JIRA_DESCRIPTION
+
+---
+
+$PLAN_SECTION
+
+---
+
+## Base Standards (apply always)
+$BASE_STANDARDS
+
+---
+
+## Stack Agent (your role)
+$AGENT_CONTENT
+
+---
+
+## Stack Standards (conventions to follow)
+$STANDARDS_CONTENT
+
+---
+
+## Implementation Instructions
+$COMMAND_TEMPLATE
+PROMPT_EOF
+)
+
+# ── Copy to clipboard ────────────────────────────────────────
+CLIPBOARD_OK=0
+if command -v pbcopy > /dev/null 2>&1; then
+  echo "$PROMPT" | pbcopy && CLIPBOARD_OK=1
+elif command -v xclip > /dev/null 2>&1; then
+  echo "$PROMPT" | xclip -selection clipboard && CLIPBOARD_OK=1
+elif command -v xsel > /dev/null 2>&1; then
+  echo "$PROMPT" | xsel --clipboard --input && CLIPBOARD_OK=1
+fi
+
+PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
+echo "$PROMPT" > "$PROMPT_FILE"
+
+# ── Summary ──────────────────────────────────────────────────
+os_divider
+if [ "$CLIPBOARD_OK" = "1" ]; then
+  os_success "Implementation prompt copied to clipboard!"
+else
+  os_info "Prompt saved to: $PROMPT_FILE"
+fi
+os_divider
+os_label "  Next steps:"
+os_info  "1. Paste the prompt into Copilot Chat (VS Code)"
+os_info  "2. Copilot will implement the ticket step by step"
+os_info  "3. Review the changes, then run:"
+os_info  "   os-commit $TICKET_ID"
+os_divider

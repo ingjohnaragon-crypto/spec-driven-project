@@ -5,8 +5,7 @@ schema: spec-driven
 # Change this value to switch the active stack.
 # Must match one of the keys defined under "stacks:" below.
 # ─────────────────────────────────────────────
-stack: java-spring
-
+stack: python-fastapi
 # ─────────────────────────────────────────────
 # STACK REGISTRY
 # Each key defines a supported stack with its
