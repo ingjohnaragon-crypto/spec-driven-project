@@ -306,7 +306,55 @@ coverage/YYYYMMDD-backend-coverage/
 
 ---
 
-## 🗄️ Database Migrations (Flyway)
+## � Python / FastAPI Setup
+
+This repository also supports the Python FastAPI base application template used by KAN-6.
+
+### Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### Run the application
+
+```bash
+uvicorn main:app --reload
+```
+
+### Environment variables
+
+Create a local `.env` file based on `.env.example` and add the following values:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/openspec
+APP_NAME=open-spec-base-app
+APP_VERSION=0.1.0
+ENVIRONMENT=development
+```
+
+### Run database migrations
+
+```bash
+alembic upgrade head
+```
+
+### Run tests
+
+```bash
+pytest
+```
+
+### Lint and type check
+
+```bash
+ruff check .
+mypy src
+```
+
+---
+
+## �🗄️ Database Migrations (Flyway)
 
 Flyway migrations run **automatically** when the application starts. All scripts live under:
 
