@@ -65,3 +65,51 @@ async def test_should_return_422_for_invalid_health_request() -> None:
     body = response.json()
     assert body["code"] == "VALIDATION_ERROR"
     assert body["success"] is False
+@pytest.mark.asyncio
+async def test_should_return_404_when_getting_nonexistent_health_record() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.get("/api/v1/health/99999")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["success"] is False
+    assert body["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_should_return_404_when_updating_nonexistent_health_record() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.put(
+            "/api/v1/health/99999",
+            json={"service_name": "x", "status": "healthy", "version": "1.0.0"},
+        )
+    assert response.status_code == 404
+    body = response.json()
+    assert body["success"] is False
+    assert body["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_should_return_404_when_deleting_nonexistent_health_record() -> None:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        response = await client.delete("/api/v1/health/99999")
+    assert response.status_code == 404
+    body = response.json()
+    assert body["success"] is False
+    assert body["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_should_delete_existing_health_record() -> None:
+    body = {"service_name": "delete-test", "status": "healthy", "version": "1.0.0"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        create = await client.post("/api/v1/health/", json=body)
+        assert create.status_code == 201
+        record_id = create.json()["id"]
+        delete = await client.delete(f"/api/v1/health/{record_id}")
+        assert delete.status_code == 204
+        get = await client.get(f"/api/v1/health/{record_id}")
+        assert get.status_code == 404
