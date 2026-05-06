@@ -1,0 +1,50 @@
+---
+description: >
+  Frontend development standards for Angular projects.
+  Covers component architecture, state management, testing, and development workflow.
+stack: frontend-angular
+alwaysApply: true
+---
+
+# Angular — Standards and Best Practices
+
+## Technology Stack
+- Angular 17+ (standalone components)
+- TypeScript 5.x strict mode
+- NgRx or Angular Signals for state management
+- Angular Material or Tailwind CSS
+- Jest + Angular Testing Library (90% coverage threshold)
+- ESLint + Angular ESLint rules
+
+## Architecture
+```
+core/       Singleton services, guards, interceptors (providedIn: 'root')
+shared/     Reusable components, pipes, directives
+features/   One folder per domain area (components + containers + services + models)
+layout/     Shell, navigation, header components
+```
+
+## Key Rules
+- `ChangeDetectionStrategy.OnPush` on every component — no exceptions
+- Standalone components preferred over NgModules (Angular 17+)
+- Typed `FormGroup<T>` always — never untyped `FormGroup`
+- All API calls go through feature services — never directly inside components
+- Smart (container) components connect to state; dumb (presentational) components use `@Input`/`@Output` only
+- HTTP interceptor centralizes error mapping — services never catch HTTP errors individually
+
+## Naming Conventions
+| Element | Convention | Example |
+|---|---|---|
+| Components | PascalCase + suffix | `CandidateListComponent` |
+| Services | PascalCase + suffix | `CandidateService` |
+| Files | kebab-case | `candidate-list.component.ts` |
+
+## Testing
+- `TestBed` + Angular Testing Library
+- `HttpClientTestingModule` for service HTTP tests
+- 90% coverage enforced in `jest.config.ts`
+- AAA pattern; test name: `should do something when condition`
+
+## Git Workflow
+- Branch naming: `feature/<ticket-id>-frontend`
+- Commits: English, conventional commits

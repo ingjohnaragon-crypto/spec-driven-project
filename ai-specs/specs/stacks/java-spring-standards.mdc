@@ -1,0 +1,274 @@
+---
+description: >
+  Backend development standards, best practices, and conventions for Java 17 + Spring Boot
+  projects. Covers DDD layered architecture, JPA/Hibernate, Flyway, testing with JUnit 5,
+  security, and development workflow.
+stack: java-spring
+globs:
+  - "src/**/*.java"
+  - "src/main/resources/**/*.{yml,yaml,properties}"
+  - "src/test/**/*.java"
+  - "build.gradle"
+  - "src/main/resources/db/migration/**/*.sql"
+alwaysApply: true
+---
+
+# Java Spring Boot — Standards and Best Practices
+
+## Technology Stack
+
+### Core
+- **Java 17**: records, sealed classes, pattern matching, text blocks
+- **Spring Boot 3.x**: auto-configuration, Spring MVC via `@RestController`
+- **Spring Security**: JWT / OAuth2
+- **Gradle**: build and dependency management (`./gradlew` always — never `mvn`)
+
+### Database & ORM
+- **PostgreSQL** as the relational database
+- **Spring Data JPA + Hibernate** for ORM and repository abstraction
+- **Flyway** for schema migrations (scripts at `src/main/resources/db/migration/`)
+- **HikariCP** for connection pooling
+
+### Testing
+- **JUnit 5** as the primary testing framework
+- **Mockito** for mocking in unit tests
+- **MockMvc** for controller/HTTP slice tests (no running server needed)
+- **Testcontainers** for real PostgreSQL in integration tests
+- **JaCoCo** for coverage enforcement — threshold: **90%** (branches, methods, lines, instructions)
+
+### Development Tools
+- **Lombok**: `@Getter`, `@Builder`, `@RequiredArgsConstructor`
+- **MapStruct**: type-safe DTO <-> entity mapping
+- **SpringDoc OpenAPI**: Swagger UI at `/swagger-ui.html`
+- **Checkstyle / SpotBugs**: static analysis
+
+---
+
+## Layered Architecture
+
+```
+Presentation   @RestController, @ControllerAdvice
+Application    @Service, @Transactional, DTOs, Mappers
+Domain         Entities, Value Objects, Repository interfaces, Exceptions
+Infrastructure JPA Repository impls, Flyway, Config, Security
+```
+
+### Rules per layer
+
+**Presentation**
+- Thin controllers — only HTTP handling, no business logic
+- Always use `ResponseEntity<>` with explicit status codes
+- Validate inputs with `@Valid @RequestBody` — never manually in method body
+- Never expose JPA entities; use DTOs
+
+**Application**
+- Annotate with `@Service` and `@Transactional`
+- Constructor injection always (`@RequiredArgsConstructor`) — never `@Autowired` on fields
+- Accept DTOs with `@Valid`; delegate to repositories and domain models
+- Catch `DataIntegrityViolationException` and rethrow as domain exceptions
+
+**Domain**
+- JPA entities with protected no-arg constructor and static factory methods
+- Business logic inside entity methods — not in services
+- Repository interfaces extend `JpaRepository<Entity, Long>`
+- Return `Optional<>` from repositories — never `null`
+
+**Infrastructure**
+- Spring Data JPA implementations (auto-generated or custom `@Query`)
+- Flyway scripts — naming: `V{n}__{descriptive_snake_case}.sql`
+- Never modify an already-applied migration
+
+---
+
+## JPA Entity Standards
+
+```java
+@Entity
+@Table(name = "candidates")
+@EntityListeners(AuditingEntityListener.class)
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Candidate {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(name = "first_name", nullable = false, length = 100)
+    private String firstName;
+
+    @Column(nullable = false, unique = true, length = 255)
+    private String email;
+
+    @OneToMany(mappedBy = "candidate", cascade = CascadeType.ALL,
+               orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<Education> educations = new ArrayList<>();
+
+    @CreatedDate
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt;
+
+    public static Candidate create(String firstName, String email) {
+        Candidate c = new Candidate();
+        c.firstName = Objects.requireNonNull(firstName);
+        c.setEmail(email);
+        return c;
+    }
+
+    public void setEmail(String email) {
+        if (email == null || !email.contains("@"))
+            throw new IllegalArgumentException("Invalid email: " + email);
+        this.email = email;
+    }
+}
+```
+
+---
+
+## Naming Conventions
+
+| Element | Convention | Example |
+|---|---|---|
+| Classes / Interfaces | PascalCase | `CandidateService` |
+| Methods / Variables | camelCase | `findById`, `candidateId` |
+| Constants | UPPER_SNAKE_CASE | `MAX_CANDIDATES_PER_PAGE` |
+| Packages | lowercase | `com.company.domain.model` |
+| DB tables | snake_case | `work_experience` |
+| DB columns | snake_case | `first_name`, `created_at` |
+| Flyway scripts | `V{n}__description.sql` | `V2__add_resume_table.sql` |
+
+**All code, comments, logs, and error messages must be in English.**
+
+---
+
+## Error Handling
+
+```java
+// Domain exception
+public class CandidateNotFoundException extends RuntimeException {
+    public CandidateNotFoundException(Long id) {
+        super("Candidate not found with id: " + id);
+    }
+}
+
+// Centralized mapping
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(CandidateNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(CandidateNotFoundException ex) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+            .body(new ErrorResponse("NOT_FOUND", ex.getMessage()));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        List<String> details = ex.getBindingResult().getFieldErrors().stream()
+            .map(f -> f.getField() + ": " + f.getDefaultMessage()).toList();
+        return ResponseEntity.badRequest()
+            .body(new ErrorResponse("VALIDATION_ERROR", "Validation failed", details));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
+        log.error("Unexpected error", ex);
+        return ResponseEntity.status(500)
+            .body(new ErrorResponse("INTERNAL_ERROR", "An unexpected error occurred"));
+    }
+}
+```
+
+---
+
+## Testing Standards
+
+```java
+@ExtendWith(MockitoExtension.class)
+class CandidateServiceTest {
+
+    @Mock private CandidateRepository candidateRepository;
+    @InjectMocks private CandidateService candidateService;
+
+    @Nested
+    @DisplayName("create()")
+    class Create {
+
+        @Test
+        @DisplayName("should create candidate when email is unique")
+        void shouldCreateCandidate_whenEmailIsUnique() {
+            // Arrange
+            var request = new CreateCandidateRequest("John", "john@example.com");
+            when(candidateRepository.existsByEmail(request.email())).thenReturn(false);
+            when(candidateRepository.save(any())).thenReturn(Candidate.create("John", "john@example.com"));
+
+            // Act
+            var result = candidateService.create(request);
+
+            // Assert
+            assertThat(result).isNotNull();
+            verify(candidateRepository).save(any(Candidate.class));
+        }
+
+        @Test
+        @DisplayName("should throw DuplicateEmailException when email already exists")
+        void shouldThrow_whenEmailAlreadyExists() {
+            var request = new CreateCandidateRequest("Jane", "jane@example.com");
+            when(candidateRepository.existsByEmail(request.email())).thenReturn(true);
+
+            assertThatThrownBy(() -> candidateService.create(request))
+                .isInstanceOf(DuplicateEmailException.class);
+            verify(candidateRepository, never()).save(any());
+        }
+    }
+}
+```
+
+**Coverage commands:**
+```bash
+# Run tests
+./gradlew test
+
+# Generate JaCoCo report (output: build/reports/jacoco/)
+./gradlew test jacocoTestReport
+
+# Verify threshold (fails build if below 90%)
+./gradlew check
+```
+
+---
+
+## REST API Standards
+
+- Nouns in paths (`/candidates`, not `/getCandidate`)
+- Kebab-case for multi-word segments (`/work-experiences`)
+- Plural for collections
+- Path variables for identity; query params for filtering and pagination
+
+```
+GET    /candidates           List (paginated)
+GET    /candidates/{id}      Get by ID
+POST   /candidates           Create
+PUT    /candidates/{id}      Full update
+PATCH  /candidates/{id}      Partial update
+DELETE /candidates/{id}      Delete
+```
+
+---
+
+## Security
+
+- Constructor injection always — never `@Autowired` on fields
+- Never commit secrets — use environment variables with `${VAR:default}` in `application.yml`
+- `spring.jpa.hibernate.ddl-auto=validate` in all environments — never `update` or `create`
+
+---
+
+## Git Workflow
+
+- Branch naming: `feature/<ticket-id>-backend`
+- Commits: English, imperative, conventional commits format
+- Small, focused branches — one concern per branch
+- All PRs require review before merging; CI must be green

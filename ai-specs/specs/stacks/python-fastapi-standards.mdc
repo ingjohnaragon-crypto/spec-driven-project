@@ -1,0 +1,52 @@
+---
+description: >
+  Backend development standards for Python 3.12 + FastAPI + SQLAlchemy + Alembic projects.
+  Covers clean architecture, DDD, testing with pytest, and development workflow.
+stack: python-fastapi
+alwaysApply: true
+---
+
+# Python + FastAPI — Standards and Best Practices
+
+## Technology Stack
+- Python 3.12+ — type hints mandatory on all functions and methods
+- FastAPI with Pydantic v2
+- SQLAlchemy 2.x (async) + PostgreSQL
+- Alembic for migrations (scripts under `alembic/versions/`)
+- pytest + httpx for testing (90% coverage threshold)
+- Ruff for linting + mypy (strict) for type checking
+
+## Architecture
+```
+domain/        Pure Python — no FastAPI or SQLAlchemy dependencies
+application/   Services + Pydantic DTOs + Mappers
+presentation/  FastAPI Routers + Depends() wiring + Exception handlers
+infrastructure/ SQLAlchemy repositories + DB session + Config
+```
+
+## Key Rules
+- Type hints required on every function signature — mypy strict enforced
+- Pydantic models validate all external input before reaching services
+- SQLAlchemy ORM models live only in `infrastructure/` — never imported in domain or application
+- Alembic for all schema changes — never use `Base.metadata.create_all()` in production
+- FastAPI `Depends()` for dependency injection — no manual service instantiation in handlers
+- Global exception handlers registered on the `app` instance for domain and validation errors
+
+## Naming Conventions
+| Element | Convention | Example |
+|---|---|---|
+| Files / Modules | snake_case | `candidate_service.py` |
+| Classes | PascalCase | `CandidateService` |
+| Functions / vars | snake_case | `create_candidate` |
+| DB tables | snake_case | `work_experience` |
+| Alembic scripts | auto-named | `abc123_add_resume_column.py` |
+
+## Testing
+- pytest with `pytest-asyncio` for async tests
+- httpx `AsyncClient` for HTTP integration tests
+- `pyproject.toml` enforces 90% coverage via `pytest --cov`
+- AAA pattern; test name: `test_should_do_something_when_condition`
+
+## Git Workflow
+- Branch naming: `feature/<ticket-id>-backend`
+- Commits: English, conventional commits

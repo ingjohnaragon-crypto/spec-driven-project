@@ -1,0 +1,53 @@
+---
+description: >
+  Backend development standards for Node.js + Express + TypeScript + Prisma projects.
+  Covers clean architecture, DDD, testing with Jest, and development workflow.
+stack: node-express
+alwaysApply: true
+---
+
+# Node.js + Express — Standards and Best Practices
+
+## Technology Stack
+- TypeScript 5.x — strict mode, no `any`
+- Node.js 20 LTS
+- Express 4.x
+- Prisma ORM + PostgreSQL
+- Jest + Supertest for testing (90% coverage threshold)
+- Zod for runtime validation
+- ESLint + Prettier for code quality
+
+## Architecture
+```
+domain/        Pure TypeScript — no framework dependencies
+application/   Services + DTOs + Mappers
+presentation/  Express Controllers + Routers + Middleware
+infrastructure/ Prisma repositories + DB config
+```
+
+## Key Rules
+- TypeScript strict mode always — no `any`, explicit return types everywhere
+- Constructor injection for all dependencies — no service locator pattern
+- Zod schemas validate all external input before it reaches services
+- Never expose Prisma models in API responses — always map to DTOs
+- Centralized error middleware handles all domain and validation errors
+- `prisma migrate dev` for local, `prisma migrate deploy` for production — never edit DB directly
+
+## Naming Conventions
+| Element | Convention | Example |
+|---|---|---|
+| Files | kebab-case | `candidate-service.ts` |
+| Classes | PascalCase | `CandidateService` |
+| Functions / vars | camelCase | `createCandidate` |
+| DB tables | snake_case | `work_experience` |
+| Prisma migrations | descriptive | `20240101_add_resume_column` |
+
+## Testing
+- Jest + `ts-jest` for unit tests
+- Supertest for HTTP integration tests
+- `jest.config.ts` enforces 90% threshold on branches, lines, functions
+- AAA pattern required; test name: `should_doSomething_when_condition`
+
+## Git Workflow
+- Branch naming: `feature/<ticket-id>-backend`
+- Commits: English, conventional commits (`feat`, `fix`, `test`, `docs`)

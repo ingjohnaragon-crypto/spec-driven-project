@@ -1,0 +1,153 @@
+#!/bin/sh
+# os-agent [--list | <agent-name>]
+# ─────────────────────────────────────────────────────────────
+# Lists available AI agents or switches the active agent in
+# openspec/config.yaml without opening an editor.
+# ─────────────────────────────────────────────────────────────
+set -e
+
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/agent.sh"
+
+os_load_config
+os_load_agent
+
+ARG="${1:-}"
+
+# ── List available agents ────────────────────────────────────
+if [ "$ARG" = "--list" ] || [ "$ARG" = "-l" ] || [ -z "$ARG" ]; then
+  os_divider
+  os_label "  Available agents (active: $OS_ACTIVE_AGENT)"
+  os_divider
+
+  py -X utf8 - "$OS_CONFIG" "$OS_ACTIVE_AGENT" << 'PYEOF'
+import sys, re
+
+config_path = sys.argv[1]
+active = sys.argv[2]
+
+with open(config_path, encoding="utf-8") as f:
+    lines = f.readlines()
+
+in_agents = False
+current = None
+fields = {}
+
+for line in lines:
+    s = line.rstrip()
+    if re.match(r'^agents:\s*$', s):
+        in_agents = True
+        continue
+    if in_agents:
+        if s and not s.startswith(' '):
+            if current:
+                marker = " <-- active" if current == active else ""
+                label = fields.get('label', current)
+                delivery = fields.get('delivery', 'clipboard')
+                print(f"  {current} ({delivery}){marker}")
+                print(f"    {label}")
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', s)
+        if m:
+            if current:
+                marker = " <-- active" if current == active else ""
+                label = fields.get('label', current)
+                delivery = fields.get('delivery', 'clipboard')
+                print(f"  {current} ({delivery}){marker}")
+                print(f"    {label}")
+            current = m.group(1)
+            fields = {}
+        elif current:
+            fm = re.match(r'^    ([a-zA-Z0-9_]+):\s*(.+)$', s)
+            if fm:
+                fields[fm.group(1)] = fm.group(2).strip().strip('"').strip("'")
+PYEOF
+
+  os_divider
+  os_info "Usage: os-agent <agent-name>"
+  os_info "       os-agent --list"
+  os_divider
+
+  if [ -z "$ARG" ] || [ "$ARG" = "--list" ] || [ "$ARG" = "-l" ]; then
+    exit 0
+  fi
+fi
+
+# ── Switch active agent ──────────────────────────────────────
+NEW_AGENT="$ARG"
+
+# Validate agent exists
+VALID=$(py -X utf8 - "$OS_CONFIG" "$NEW_AGENT" << 'PYEOF'
+import sys, re
+
+config_path, target = sys.argv[1], sys.argv[2]
+with open(config_path, encoding="utf-8") as f:
+    lines = f.readlines()
+
+in_agents = False
+for line in lines:
+    s = line.rstrip()
+    if re.match(r'^agents:\s*$', s):
+        in_agents = True
+        continue
+    if in_agents:
+        if s and not s.startswith(' '):
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', s)
+        if m and m.group(1) == target:
+            print("valid")
+            sys.exit(0)
+
+print("invalid")
+PYEOF
+)
+
+if [ "$VALID" != "valid" ]; then
+  os_error "Agent '$NEW_AGENT' not found in openspec/config.yaml"
+  os_info  "Run 'os-agent --list' to see available agents"
+  exit 1
+fi
+
+# Update config.yaml — replace "agent: <current>" with "agent: <new>"
+py -X utf8 - "$OS_CONFIG" "$NEW_AGENT" << 'PYEOF'
+import sys, re
+
+config_path, new_agent = sys.argv[1], sys.argv[2]
+
+with open(config_path, encoding="utf-8") as f:
+    content = f.read()
+
+updated = re.sub(
+    r'^(agent:\s*)["\']?[a-zA-Z0-9_-]+["\']?',
+    f'\\g<1>{new_agent}',
+    content,
+    count=1,
+    flags=re.MULTILINE
+)
+
+with open(config_path, 'w', newline='\n') as f:
+    f.write(updated)
+
+print(f"switched to: {new_agent}")
+PYEOF
+
+os_divider
+os_success "Active agent switched to: $NEW_AGENT"
+
+# Show new agent info
+os_load_agent
+os_print_agent
+
+if [ "$OS_AGENT_DELIVERY" = "cli" ]; then
+  os_divider
+  os_info "CLI mode: prompts will be sent directly to $OS_AGENT_COMMAND"
+  if ! command -v "$OS_AGENT_COMMAND" > /dev/null 2>&1; then
+    os_warn "$OS_AGENT_COMMAND not found in PATH — install it before using os-plan"
+  fi
+else
+  os_divider
+  os_info "Clipboard mode: prompts will be copied for manual paste"
+fi
+os_divider

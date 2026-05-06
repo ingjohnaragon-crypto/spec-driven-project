@@ -1,0 +1,53 @@
+---
+description: >
+  Backend development standards for Go + Gin + GORM + golang-migrate projects.
+  Covers clean architecture, DDD, testing, and development workflow.
+stack: go-gin
+alwaysApply: true
+---
+
+# Go + Gin — Standards and Best Practices
+
+## Technology Stack
+- Go 1.22+
+- Gin web framework
+- GORM + PostgreSQL
+- golang-migrate for schema migrations (files at `migrations/`)
+- testify for assertions (90% coverage threshold)
+- golangci-lint for static analysis
+
+## Architecture
+```
+internal/domain/         Pure Go structs + repository interfaces + error types
+internal/application/    Services + DTOs
+internal/presentation/   Gin handlers + middleware
+internal/infrastructure/ GORM repository impls + DB setup + Config
+```
+
+## Key Rules
+- All errors must be wrapped with context: `fmt.Errorf("service.Create: %w", err)`
+- Return `(T, error)` always — never panic in request handlers
+- Repository interfaces in domain; GORM implementations in infrastructure
+- golang-migrate for all schema changes — never use `AutoMigrate` in production
+- Constructor functions (`New<Type>`) enforce invariants
+- Gin `ShouldBindJSON` for input binding; centralized error middleware for responses
+
+## Naming Conventions
+| Element | Convention | Example |
+|---|---|---|
+| Files | snake_case | `candidate_service.go` |
+| Exported types/funcs | PascalCase | `CandidateService` |
+| Unexported | camelCase | `validateEmail` |
+| DB tables | snake_case | `work_experience` |
+| Migration files | `000001_description.up/down.sql` | `000002_add_resume.up.sql` |
+
+## Testing
+- `testing` package + testify for assertions
+- `httptest` for HTTP handler tests
+- Table-driven tests preferred for multiple cases
+- Test name: `TestCandidateService_Create_ShouldError_WhenEmailExists`
+- 90% coverage via `go test -coverprofile=coverage.out ./...`
+
+## Git Workflow
+- Branch naming: `feature/<ticket-id>-backend`
+- Commits: English, conventional commits

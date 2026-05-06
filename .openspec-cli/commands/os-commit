@@ -1,0 +1,191 @@
+#!/bin/sh
+# os-commit [TICKET-ID]
+# ─────────────────────────────────────────────────────────────
+# Detects changed files, generates a conventional commit message,
+# stages only relevant files, commits, pushes and opens a PR.
+# Requires: git, gh (GitHub CLI)
+# ─────────────────────────────────────────────────────────────
+set -e
+
+TICKET_ID="${1:-}"
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+
+# ── Load config ──────────────────────────────────────────────
+os_load_config
+os_load_env
+
+cd "$OS_REPO_ROOT"
+
+# ── Detect current branch ────────────────────────────────────
+CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+os_info "Current branch: $CURRENT_BRANCH"
+
+# Try to extract ticket ID from branch name if not passed
+if [ -z "$TICKET_ID" ]; then
+  TICKET_ID=$(echo "$CURRENT_BRANCH" \
+    | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
+fi
+
+if [ -z "$TICKET_ID" ]; then
+  os_warn "No ticket ID provided and none found in branch name."
+  os_warn "Commit message will not include a ticket reference."
+fi
+
+# ── Check for changes ────────────────────────────────────────
+CHANGED_FILES=$(git status --porcelain | grep -v '^??' | awk '{print $2}')
+UNTRACKED=$(git status --porcelain | grep '^??' | awk '{print $2}')
+
+if [ -z "$CHANGED_FILES" ] && [ -z "$UNTRACKED" ]; then
+  os_warn "No changes detected. Nothing to commit."
+  exit 0
+fi
+
+os_divider
+os_label "  Changed files:"
+git status --short
+os_divider
+
+# ── Stage all relevant changes ───────────────────────────────
+os_step "Staging changes (excluding secrets and build artifacts)..."
+
+# Stage tracked changes
+git add -u
+
+# Stage untracked files, skipping known non-commit patterns
+for f in $UNTRACKED; do
+  case "$f" in
+    .env|*.env|*.secret|build/|dist/|target/|node_modules/|__pycache__/)
+      os_warn "Skipping: $f"
+      ;;
+    *)
+      git add "$f"
+      ;;
+  esac
+done
+
+STAGED=$(git diff --cached --name-only)
+if [ -z "$STAGED" ]; then
+  os_warn "Nothing staged after filtering. Aborting."
+  exit 1
+fi
+
+os_info "Staged files:"
+echo "$STAGED" | sed 's/^/  /'
+
+# ── Determine commit scope from changed files ────────────────
+# Heuristic: pick the most common top-level domain folder changed
+SCOPE=$(echo "$STAGED" \
+  | grep -oE 'src/[^/]+/[^/]+/[^/]+' \
+  | awk -F'/' '{print $4}' \
+  | sort | uniq -c | sort -rn \
+  | head -1 | awk '{print $2}' \
+  | tr '[:upper:]' '[:lower:]' \
+  | sed 's/controller//;s/service//;s/handler//')
+
+if [ -z "$SCOPE" ]; then
+  SCOPE="app"
+fi
+
+# ── Build commit message ─────────────────────────────────────
+os_step "Building commit message..."
+
+# Determine conventional commit type from branch name
+case "$CURRENT_BRANCH" in
+  feature/*) COMMIT_TYPE="feat" ;;
+  fix/*)     COMMIT_TYPE="fix" ;;
+  test/*)    COMMIT_TYPE="test" ;;
+  docs/*)    COMMIT_TYPE="docs" ;;
+  chore/*)   COMMIT_TYPE="chore" ;;
+  refactor/*) COMMIT_TYPE="refactor" ;;
+  *)         COMMIT_TYPE="feat" ;;
+esac
+
+# Count changed files for the body
+FILE_COUNT=$(echo "$STAGED" | wc -l | tr -d ' ')
+
+if [ -n "$TICKET_ID" ]; then
+  SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
+  BODY="- Implements $TICKET_ID: changes across $FILE_COUNT file(s)
+- Stack: $OS_ACTIVE_STACK
+- Branch: $CURRENT_BRANCH"
+else
+  SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
+  BODY="- Changes across $FILE_COUNT file(s)
+- Stack: $OS_ACTIVE_STACK"
+fi
+
+os_divider
+os_label "  Proposed commit message:"
+os_divider
+echo "  $SUBJECT"
+echo ""
+echo "$BODY" | sed 's/^/  /'
+os_divider
+
+# ── Confirm before committing ────────────────────────────────
+printf "%b" "${COLOR_WARN}Proceed with this commit? [y/N]: ${RESET}"
+read -r confirm
+case "$confirm" in
+  y|Y|yes|YES) ;;
+  *)
+    os_warn "Aborted. Your changes are still staged."
+    exit 0
+    ;;
+esac
+
+# ── Commit ───────────────────────────────────────────────────
+git commit -m "$SUBJECT" -m "$BODY"
+os_success "Committed: $SUBJECT"
+
+# ── Push ─────────────────────────────────────────────────────
+os_step "Pushing branch $CURRENT_BRANCH..."
+git push -u origin "$CURRENT_BRANCH"
+os_success "Branch pushed."
+
+# ── Open PR with GitHub CLI ──────────────────────────────────
+if ! command -v gh > /dev/null 2>&1; then
+  os_warn "GitHub CLI (gh) not found — skipping PR creation."
+  os_info "Install it from: https://cli.github.com"
+  exit 0
+fi
+
+os_step "Creating Pull Request..."
+
+PR_TITLE=""
+PR_BODY=""
+
+if [ -n "$TICKET_ID" ]; then
+  PR_TITLE="[$TICKET_ID] $SUBJECT"
+  PR_BODY="## Summary
+Implements $TICKET_ID on stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Changes
+$(echo "$STAGED" | sed 's/^/- /')
+
+## Checklist
+- [ ] Tests pass (\`$OS_TEST_CMD\`)
+- [ ] Coverage >= 90% (\`$OS_COVERAGE_CMD\`)
+- [ ] Documentation updated
+- [ ] Endpoints manually tested"
+else
+  PR_TITLE="$SUBJECT"
+  PR_BODY="## Summary
+Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Branch: $CURRENT_BRANCH
+
+## Changes
+$(echo "$STAGED" | sed 's/^/- /')"
+fi
+
+PR_URL=$(gh pr create \
+  --title "$PR_TITLE" \
+  --body "$PR_BODY" \
+  --head "$CURRENT_BRANCH" 2>&1)
+
+os_divider
+os_success "Pull Request created!"
+os_info    "$PR_URL"
+os_divider

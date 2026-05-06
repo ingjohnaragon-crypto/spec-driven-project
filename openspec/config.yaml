@@ -1,133 +1,120 @@
 schema: spec-driven
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-context: |
-  Tech stack: Java 17, Spring Boot 4.x, Spring MVC, Spring Data JPA, Hibernate, PostgreSQL, Flyway
-  Architecture: Clean Architecture with Domain, Application, and Presentation layers following Domain-Driven Design (DDD)
-  Build tool: Gradle (run ./gradlew from the repository root)
-  Testing: JUnit 5, Mockito, MockMvc, Testcontainers, JaCoCo (90% coverage threshold once the JaCoCo plugin is enabled in Gradle)
-  We use conventional commits
-  Domain: COMPANY (Leadership. Technology. Impact) ATS platform
-  All code, comments, documentation, and technical artifacts must be in English
+# ─────────────────────────────────────────────
+# ACTIVE STACK
+# ─────────────────────────────────────────────
+stack: python-fastapi
 
-  Project specs (single source of truth): All artifact creation and implementation MUST follow the project's technical context in ai-specs/. Read and apply these when creating or implementing:
-  - ai-specs/specs/base-standards.mdc — core principles, TDD, language standards, links to backend/docs standards
-  - ai-specs/specs/backend-standards.mdc — API design, JPA/Hibernate, Flyway migrations, testing, security (backend changes)
-  - ai-specs/specs/api-spec.yml — API contracts and endpoint definitions
-  - ai-specs/specs/data-model.md — JPA entity model, relationships, and Flyway migration scripts
-  - ai-specs/specs/documentation-standards.mdc — docs structure and maintenance
-  For implementation: adopt the relevant agent from ai-specs/.agents/ (e.g. backend-developer.md for backend). Use ai-specs/.commands/ (e.g. develop-backend.md) for workflow guidance when applicable.
+# ─────────────────────────────────────────────
+# ACTIVE AGENT
+# Change this to switch how prompts are delivered.
+# Must match one of the keys under "agents:" below.
+# ─────────────────────────────────────────────
+agent: copilot
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-rules:
-  # Global: apply ai-specs when creating any artifact
-  _global:
-    - Before creating any artifact, read and apply ai-specs/specs/base-standards.mdc
-    - For backend-related artifacts, read ai-specs/specs/backend-standards.mdc and adopt guidelines from ai-specs/.agents/backend-developer.md
-    - Use ai-specs/specs/api-spec.yml and ai-specs/specs/data-model.md for API and data consistency in specs and tasks
-    - All entities must follow JPA conventions: @Entity, @Table(name = "snake_case"), Long IDs with @GeneratedValue(IDENTITY)
-    - All schema changes must be implemented as Flyway migration scripts under src/main/resources/db/migration/
-    - Never use spring.jpa.hibernate.ddl-auto=update or create in any environment
+# ─────────────────────────────────────────────
+# STACK REGISTRY
+# ─────────────────────────────────────────────
+stacks:
+  java-spring:
+    label: Java 17 + Spring Boot
+    build_command: ./gradlew build
+    test_command: ./gradlew test
+    run_command: ./gradlew bootRun
+    lint_command: ./gradlew checkstyleMain
+    coverage_command: ./gradlew test jacocoTestReport
+    agent: ai-specs/.agents/stacks/java-spring.md
+    standards: ai-specs/specs/stacks/java-spring-standards.mdc
 
-  # Rules for task breakdown
-  tasks:
-    - Break tasks into chunks of max 2 hours
-    - For backend changes, follow the backend implementation plan structure
-    - All backend tasks must include mandatory steps: |
-        Create Feature Branch,
-        Write/Update Unit Tests (TDD — tests before implementation),
-        Run Full Test Suite,
-        Manual Endpoint Testing with curl,
-        Documentation Update
+  node-express:
+    label: Node.js + Express
+    build_command: npm run build
+    test_command: npm test
+    run_command: npm run dev
+    lint_command: npm run lint
+    coverage_command: npm run test:coverage
+    agent: ai-specs/.agents/stacks/node-express.md
+    standards: ai-specs/specs/stacks/node-express-standards.mdc
 
-  # Rules for backend implementation plans and specs
-  spec:
-    - When creating backend implementation plans or specs, follow the Backend Implementation Plan Template Structure
-    - All backend plans must include these MANDATORY sections: |
-        1. Header with ticket ID and feature name
-        2. Overview with DDD and clean architecture principles
-        3. Architecture Context (Domain, Application, Presentation layers)
-        4. Implementation Steps (must start with Step 0: Create Feature Branch)
-        5. Implementation Order (numbered list)
-        6. Testing Checklist with mandatory validations
-        7. Error Response Format (JSON structure + HTTP status code mapping)
-        8. Dependencies (Maven/Gradle coordinates if new libraries are required)
-        9. Notes
-        10. Next Steps After Implementation
-        11. Implementation Verification Checklist
+  python-fastapi:
+    label: Python 3.12 + FastAPI
+    build_command: pip install -r requirements.txt
+    test_command: pytest
+    run_command: uvicorn main:app --reload
+    lint_command: ruff check .
+    coverage_command: pytest --cov --cov-report=html
+    agent: ai-specs/.agents/stacks/python-fastapi.md
+    standards: ai-specs/specs/stacks/python-fastapi-standards.mdc
 
-  # Backend-specific implementation rules
-  backend:
-    - Adopt the role of backend-developer when working on backend changes
-    - Apply Domain-Driven Design (DDD) principles
-    - Follow clean architecture with Domain, Application, and Presentation layers
-    - All implementation must follow TDD (Test-Driven Development — write tests before code)
-    - Branch naming: `feature/[ticket-id]-backend` (required, separate from general task branches)
+  go-gin:
+    label: Go + Gin
+    build_command: go build ./...
+    test_command: go test ./...
+    run_command: go run main.go
+    lint_command: golangci-lint run
+    coverage_command: go test -coverprofile=coverage.out ./...
+    agent: ai-specs/.agents/stacks/go-gin.md
+    standards: ai-specs/specs/stacks/go-gin-standards.mdc
 
-    - MANDATORY Steps (must be included in all backend implementation plans):
-        - Step 0: Create Feature Branch (must be FIRST step)
-        - Step N: Write Unit Tests BEFORE implementation (TDD — JUnit 5 + Mockito)
-        - Step N+1: Implement feature to make tests pass
-        - Step N+2: Run Full Test Suite and verify JaCoCo coverage >= 90%
-        - Step N+3: Manual Endpoint Testing with curl or HTTPie
-        - Step N+4: Update Technical Documentation
+  frontend-angular:
+    label: Angular
+    build_command: ng build
+    test_command: ng test --watch=false
+    run_command: ng serve
+    lint_command: ng lint
+    coverage_command: ng test --code-coverage --watch=false
+    agent: ai-specs/.agents/stacks/frontend-angular.md
+    standards: ai-specs/specs/stacks/frontend-angular-standards.mdc
 
-    - Common implementation steps:
-        - Step 1: Create or update Flyway migration script (if schema change needed)
-        - Step 2: Create or update JPA Entity in domain/model/ (@Entity, factory method, domain methods)
-        - Step 3: Create or update Repository interface in domain/repository/ (extends JpaRepository)
-        - Step 4: Create or update Request/Response DTOs in application/dto/ (with Bean Validation annotations)
-        - Step 5: Create or update MapStruct Mapper in application/mapper/
-        - Step 6: Create or update @Service class in application/service/ (with @Transactional)
-        - Step 7: Create or update @RestController in presentation/controller/
-        - Step 8: Register exception mapping in GlobalExceptionHandler (@ControllerAdvice) if new domain exceptions are introduced
-        - Step 9: Write unit tests covering all layers (service, controller via MockMvc)
+  frontend-react:
+    label: React + Vite
+    build_command: npm run build
+    test_command: npm test
+    run_command: npm run dev
+    lint_command: npm run lint
+    coverage_command: npm run test:coverage
+    agent: ai-specs/.agents/stacks/frontend-react.md
+    standards: ai-specs/specs/stacks/frontend-react-standards.mdc
 
-    - Testing requirements:
-        - Follow AAA pattern (Arrange / Act / Assert) in all tests
-        - Unit tests use @ExtendWith(MockitoExtension.class) — no Spring context loaded
-        - Controller tests use @WebMvcTest — mock the service layer with @MockBean
-        - Integration tests use @SpringBootTest + Testcontainers (real PostgreSQL)
-        - All existing unit tests must be reviewed and updated if affected by the change
-        - All new unit tests must be green before merging
-        - Full test suite must execute with 0 failures: ./gradlew test
-        - JaCoCo coverage report (when configured): ./gradlew test jacocoTestReport
-        - Coverage must meet 90% threshold: ./gradlew check (when JaCoCo verification is wired into check)
-        - Database state must be properly restored after all integration tests (@Transactional on test class or manual cleanup)
-        - All new endpoints must be manually tested with curl covering: happy path, validation errors (400), not found (404), conflict (409), server error (500)
-        - All CREATE / UPDATE / DELETE curl tests must document the rollback or cleanup step
+# ─────────────────────────────────────────────
+# AGENT REGISTRY
+# Defines how prompts are delivered to each AI assistant.
+# delivery: clipboard  -> copies prompt to clipboard (manual paste)
+# delivery: cli        -> executes command directly in terminal
+# ─────────────────────────────────────────────
+agents:
+  copilot:
+    label: GitHub Copilot (VS Code)
+    delivery: clipboard
+    command: null
 
-    - Documentation requirements:
-        - JPA entity / schema changes → Update ai-specs/specs/data-model.md (entity class + Flyway script)
-        - API endpoint changes → Update ai-specs/specs/api-spec.yml
-        - Standards / libraries / config changes → Update relevant *-standards.mdc files
-        - All documentation must be written in English
+  cursor:
+    label: Cursor
+    delivery: clipboard
+    command: null
 
-    - Error response format must follow this JSON structure:
-        ```json
-        {
-        "success": false,
-        "code": "ERROR_CODE",
-        "message": "Human-readable description",
-        "details": ["field: validation message"]
-      }
-        ```
-        HTTP status code mapping:
-          400 → VALIDATION_ERROR (Bean Validation failures, invalid input)
-          404 → NOT_FOUND (entity not found by ID or key)
-          409 → CONFLICT (unique constraint violation, duplicate email, etc.)
-          422 → BUSINESS_RULE_VIOLATION (domain invariant broken)
-          500 → INTERNAL_ERROR (unexpected exceptions)
+  windsurf:
+    label: Windsurf
+    delivery: clipboard
+    command: null
 
-    - Implementation verification checklist must include:
-        - Code Quality: no compilation warnings, Checkstyle passes, constructor injection used everywhere
-        - Domain: entity has protected no-arg constructor + static factory method, business logic is in the entity not the service
-        - Application: service is @Transactional, uses DTOs with @Valid, delegates to repository and domain — never to EntityManager directly
-        - Presentation: controller is thin, uses ResponseEntity<>, all inputs validated with @Valid
-        - Flyway: new migration script follows V{n}__description.sql naming, never modifies an existing applied script
-        - Testing: all tests green, JaCoCo >= 90%, MockMvc tests cover all HTTP status codes
-        - Integration: no N+1 queries introduced (use JOIN FETCH or @EntityGraph where needed)
-        - Documentation: data-model.md, api-spec.yml, and relevant standards files updated
+  claude-code:
+    label: Claude Code (CLI)
+    delivery: cli
+    command: claude
+    args: --print
+
+  aider:
+    label: Aider (CLI)
+    delivery: cli
+    command: aider
+    args: --message
+
+# ─────────────────────────────────────────────
+# JIRA
+# ─────────────────────────────────────────────
+jira:
+  base_url: ${JIRA_BASE_URL}
+  email: ${JIRA_EMAIL}
+  token: ${JIRA_TOKEN}
+  project_key: KAN
