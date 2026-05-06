@@ -1,0 +1,53 @@
+---
+description: >
+  Frontend development standards for React + Vite + TypeScript projects.
+  Covers component architecture, state management, testing, and development workflow.
+stack: frontend-react
+alwaysApply: true
+---
+
+# React + Vite — Standards and Best Practices
+
+## Technology Stack
+- React 18+ with Vite
+- TypeScript 5.x strict mode — no `any`
+- TanStack Query (React Query) for server state
+- Zustand for client-only state
+- Tailwind CSS or CSS Modules
+- Vitest + React Testing Library (90% coverage threshold)
+- ESLint + typescript-eslint
+
+## Architecture
+```
+api/         Typed API client functions (one file per resource)
+components/  Shared/reusable UI
+features/    Feature-scoped folders (components + hooks + types + index.ts)
+hooks/       Global custom hooks
+pages/       Route-level components
+utils/       Pure utility functions
+```
+
+## Key Rules
+- No business logic inside components — extract to custom hooks
+- Custom hooks wrap all API calls and expose `{ data, isLoading, error }`
+- React Query for all server state — no `useEffect` for data fetching
+- TypeScript strict: no `any`, explicit return types on all exported functions
+- `<ErrorBoundary>` wraps all feature roots
+- No direct `fetch` in components — always use the `api/` layer
+
+## Naming Conventions
+| Element | Convention | Example |
+|---|---|---|
+| Components | PascalCase | `CandidateCard` |
+| Hooks | camelCase + `use` prefix | `useCandidateList` |
+| Files | camelCase or PascalCase | `CandidateCard.tsx`, `useCandidateList.ts` |
+
+## Testing
+- React Testing Library — test behavior, not implementation details
+- `renderHook` for custom hooks
+- 90% coverage enforced in `vitest.config.ts`
+- AAA pattern
+
+## Git Workflow
+- Branch naming: `feature/<ticket-id>-frontend`
+- Commits: English, conventional commits

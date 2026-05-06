@@ -1,0 +1,65 @@
+#!/bin/sh
+# os-enrich-apply <TICKET-ID> [file]
+set -e
+
+TICKET_ID="${1:-}"
+CONTENT_FILE="${2:-}"
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/jira.sh"
+
+if [ -z "$TICKET_ID" ]; then
+  os_error "Usage: os-enrich-apply <TICKET-ID> [content-file]"
+  exit 1
+fi
+
+os_load_config
+os_load_env
+os_require_jira_env
+
+ENRICHED_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
+
+if [ -n "$CONTENT_FILE" ] && [ -f "$CONTENT_FILE" ]; then
+  SOURCE_FILE="$CONTENT_FILE"
+elif [ -f "$ENRICHED_FILE" ]; then
+  SOURCE_FILE="$ENRICHED_FILE"
+else
+  os_error "No enriched content file found."
+  os_info  "Save Copilot output to: .openspec-cli/.enriched-content.md"
+  exit 1
+fi
+
+os_step "Reading content from: $SOURCE_FILE"
+CHAR_COUNT=$(wc -c < "$SOURCE_FILE")
+os_info "Content size: $CHAR_COUNT characters"
+
+os_divider
+os_label "  Preview (first 10 lines):"
+os_divider
+head -10 "$SOURCE_FILE"
+os_divider
+
+printf "%bUpdate Jira ticket %s? [y/N]: %b" "$COLOR_WARN" "$TICKET_ID" "$RESET"
+read -r confirm
+case "$confirm" in
+  y|Y|yes|YES) ;;
+  *) os_warn "Aborted."; exit 0 ;;
+esac
+
+os_step "Uploading to Jira $TICKET_ID..."
+
+py "$HOME/.openspec/lib/jira_upload.py"   "$TICKET_ID" "$SOURCE_FILE"   "$JIRA_BASE_URL" "$JIRA_EMAIL" "$JIRA_TOKEN"
+
+EXIT_CODE=$?
+if [ "$EXIT_CODE" = "0" ]; then
+  os_divider
+  os_info    "View: $JIRA_BASE_URL/browse/$TICKET_ID"
+  os_divider
+  mv "$SOURCE_FILE" "${SOURCE_FILE}.applied" 2>/dev/null || true
+  os_info "Content archived to: ${SOURCE_FILE}.applied"
+else
+  os_error "Failed to update Jira (exit code $EXIT_CODE)"
+  exit 1
+fi
