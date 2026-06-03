@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# os-vault-deploy — Deploy a Smart Contract as a ProductVersion in Vault Core
+# Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]
+# Example:
+#   os-vault-deploy contracts/savings_product.py savings_product "Savings Product v2" 3.11.0
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+CONTRACT_FILE="${1:-}"
+PRODUCT_ID="${2:-}"
+DISPLAY_NAME="${3:-}"
+API_VERSION="${4:-3.11.0}"
+
+if [ -z "${CONTRACT_FILE}" ] || [ -z "${PRODUCT_ID}" ] || [ -z "${DISPLAY_NAME}" ]; then
+    os_print_error "Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]"
+    os_print_info  "Example: os-vault-deploy contracts/savings_product.py savings_product \"Savings Product\" 3.11.0"
+    exit 1
+fi
+
+if [ ! -f "${CONTRACT_FILE}" ]; then
+    os_print_error "Contract file not found: ${CONTRACT_FILE}"
+    exit 1
+fi
+
+if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
+    exit 1
+fi
+
+os_print_separator
+os_print_header "OpenSpec — Vault Smart Contract Deploy"
+os_print_separator
+os_print_info "Contract    : ${CONTRACT_FILE}"
+os_print_info "Product ID  : ${PRODUCT_ID}"
+os_print_info "Name        : ${DISPLAY_NAME}"
+os_print_info "API version : ${API_VERSION}"
+os_print_info "Vault URL   : ${VAULT_BASE_URL}"
+os_print_separator
+
+os_step "Building deploy payload..."
+PAYLOAD_FILE=$(mktemp /tmp/os-vault-deploy-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE}" EXIT
+
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_deploy_payload.py" \
+    "${CONTRACT_FILE}" \
+    "${PRODUCT_ID}" \
+    "${DISPLAY_NAME}" \
+    "${API_VERSION}" > "${PAYLOAD_FILE}"
+
+os_step "Calling POST /v1/product-versions ..."
+
+RESULT_FILE=$(mktemp /tmp/os-vault-deploy-result-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+
+HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d @"${PAYLOAD_FILE}" \
+    "${VAULT_BASE_URL}/v1/product-versions")
+
+if [ "${HTTP_STATUS}" != "200" ]; then
+    os_print_error "Deploy failed (HTTP ${HTTP_STATUS}):"
+    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
+    exit 1
+fi
+
+"${OS_PYTHON}" << PYEOF
+import json
+
+with open("${RESULT_FILE}") as f:
+    result = json.load(f)
+
+pv = result.get("product_version", result)
+print(f"\n✅ Product version deployed successfully!")
+print(f"   product_version_id : {pv.get('id','?')}")
+print(f"   product_id         : {pv.get('product_id','?')}")
+print(f"   display_name       : {pv.get('display_name','?')}")
+print(f"   is_current         : {pv.get('is_current','?')}")
+print(f"   api_version        : {pv.get('contracts_language_api_version','?')}")
+print(f"\n   Next steps:")
+print(f"   1. Create an account: os-vault-account <product_version_id>")
+print(f"   2. Test with postings via Vault dashboard or API")
+PYEOF
+
+os_print_separator

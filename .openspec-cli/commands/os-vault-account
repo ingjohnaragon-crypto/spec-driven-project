@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# os-vault-account — Create a test account in Vault linked to a product version
+# Usage: os-vault-account <product_version_id> <customer_id> [denomination]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+PRODUCT_VERSION_ID="${1:-}"
+CUSTOMER_ID="${2:-}"
+DENOMINATION="${3:-GBP}"
+
+if [ -z "${PRODUCT_VERSION_ID}" ] || [ -z "${CUSTOMER_ID}" ]; then
+    os_print_error "Usage: os-vault-account <product_version_id> <customer_id> [denomination]"
+    exit 1
+fi
+
+os_print_separator
+os_print_header "OpenSpec — Vault Account Creation"
+os_print_separator
+
+PAYLOAD=$(cat << JSONEOF
+{
+  "account": {
+    "product_version_id": "${PRODUCT_VERSION_ID}",
+    "name": "OpenSpec Test Account",
+    "stakeholder_ids": ["${CUSTOMER_ID}"],
+    "permitted_denominations": ["${DENOMINATION}"],
+    "status": "ACCOUNT_STATUS_OPEN",
+    "instance_param_vals": {}
+  }
+}
+JSONEOF
+)
+
+os_step "Calling POST /v1/accounts ..."
+
+RESULT=$(curl -sf -X POST \
+    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "${PAYLOAD}" \
+    "${VAULT_BASE_URL}/v1/accounts")
+
+ACCOUNT_ID=$(echo "${RESULT}" | "${OS_PYTHON}" -c "import json,sys; d=json.load(sys.stdin); print(d.get('account',d).get('id','?'))")
+
+os_print_success "Account created: ${ACCOUNT_ID}"
+os_print_info "Check balances: os-vault-balances ${ACCOUNT_ID}"
+os_print_separator

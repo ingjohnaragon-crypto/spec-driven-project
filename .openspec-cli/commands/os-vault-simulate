@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# os-vault-simulate — Test a Smart Contract against Vault Core API
+# Usage: os-vault-simulate <contract_file> [start_ts] [end_ts] [param_vals_json]
+# Example:
+#   os-vault-simulate contracts/savings_product.py
+#   os-vault-simulate contracts/savings_product.py 2024-01-01T00:00:00Z 2024-02-01T00:00:00Z
+#   os-vault-simulate contracts/savings_product.py "" "" '{"interest_rate":"0.05"}'
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_BIN="${SCRIPT_DIR}"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+OS_CLI_ROOT="${SCRIPT_DIR}/../.."
+
+# ── Load env and config ───────────────────────────────────────
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+CONTRACT_FILE="${1:-}"
+START_TS="${2:-}"
+END_TS="${3:-}"
+PARAM_VALS="${4:-{}}"
+
+if [ -z "${CONTRACT_FILE}" ]; then
+    os_print_error "Usage: os-vault-simulate <contract_file> [start_ts] [end_ts] [param_vals_json]"
+    os_print_info  "Example: os-vault-simulate contracts/savings_product.py"
+    exit 1
+fi
+
+if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    os_print_error "Missing Vault credentials. Add to .env:"
+    os_print_info  "  VAULT_BASE_URL=https://your-vault-instance.com"
+    os_print_info  "  VAULT_TOKEN=your_vault_api_token"
+    exit 1
+fi
+
+source "${OS_CLI_LIB}/vault.sh"
+
+os_print_separator
+os_print_header "OpenSpec — Vault Smart Contract Simulation"
+os_print_separator
+os_print_info "Contract  : ${CONTRACT_FILE}"
+os_print_info "Vault URL : ${VAULT_BASE_URL}"
+os_print_info "Window    : ${START_TS:-auto} → ${END_TS:-auto (30d)}"
+os_print_separator
+
+os_step "Building simulation payload..."
+PAYLOAD_FILE=$(mktemp /tmp/os-vault-simulate-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE}" EXIT
+
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_simulate_payload.py" \
+    "${CONTRACT_FILE}" \
+    "${START_TS}" \
+    "${END_TS}" \
+    "${PARAM_VALS}" > "${PAYLOAD_FILE}"
+
+os_step "Calling POST /v1/contracts:simulate ..."
+
+RESULT_FILE=$(mktemp /tmp/os-vault-result-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+
+HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+    -X POST \
+    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d @"${PAYLOAD_FILE}" \
+    "${VAULT_BASE_URL}/v1/contracts:simulate")
+
+if [ "${HTTP_STATUS}" != "200" ]; then
+    os_print_error "Simulation failed (HTTP ${HTTP_STATUS}):"
+    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
+    exit 1
+fi
+
+os_print_success "Simulation completed (HTTP 200)"
+os_print_separator
+
+# ── Parse and display results ─────────────────────────────────
+"${OS_PYTHON}" << PYEOF
+import json, sys
+
+with open("${RESULT_FILE}") as f:
+    result = json.load(f)
+
+# Logs
+logs = result.get("logs", [])
+if logs:
+    print("\n SIMULATION LOGS:")
+    for log in logs[-10:]:  # last 10 log entries
+        print(f"  {log}")
+
+# Balances
+balances = result.get("balances", {})
+if balances:
+    print("\n BALANCES:")
+    for acct_id, bal_map in balances.items():
+        print(f"  Account: {acct_id}")
+        for key, bal in bal_map.items():
+            print(f"    {key}: {bal.get('net','?')} {bal.get('denomination','')}")
+
+# Posting batches
+pibs = result.get("posting_instruction_batches", [])
+print(f"\n POSTING BATCHES GENERATED: {len(pibs)}")
+for pib in pibs[:5]:
+    print(f"  - {pib.get('id','?')} status={pib.get('status','?')}")
+
+# Hook execution logs
+hook_logs = result.get("hook_execution_logs", [])
+if hook_logs:
+    print(f"\n HOOK EXECUTIONS: {len(hook_logs)}")
+    for hl in hook_logs[:5]:
+        print(f"  - hook={hl.get('hook_id','?')} result={hl.get('result','?')}")
+
+# Save full result
+with open("${OS_REPO_ROOT}/.openspec-cli/.last-simulation.json", "w") as f:
+    json.dump(result, f, indent=2)
+print(f"\n Full result saved to: .openspec-cli/.last-simulation.json")
+PYEOF
+
+os_print_separator

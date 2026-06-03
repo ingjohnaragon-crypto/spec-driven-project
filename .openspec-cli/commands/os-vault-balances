@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# os-vault-balances — Get live balances for a Vault account
+# Usage: os-vault-balances <account_id>
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+ACCOUNT_ID="${1:-}"
+[ -z "${ACCOUNT_ID}" ] && { os_print_error "Usage: os-vault-balances <account_id>"; exit 1; }
+
+os_print_separator
+os_print_header "OpenSpec — Vault Account Balances"
+os_print_separator
+os_print_info "Account: ${ACCOUNT_ID}"
+
+RESULT=$(curl -sf \
+    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${VAULT_BASE_URL}/v2/balances/live?account_ids=${ACCOUNT_ID}")
+
+echo "${RESULT}" | "${OS_PYTHON}" << 'PYEOF'
+import json, sys
+data = json.load(sys.stdin)
+balances = data.get("balances", {})
+for acct, bal_list in balances.items():
+    bals = bal_list if isinstance(bal_list, list) else bal_list.get("balances", [])
+    for b in bals:
+        addr = b.get("account_address", "DEFAULT")
+        denom = b.get("denomination", "")
+        net = b.get("amount", b.get("net", "?"))
+        phase = b.get("phase", "")
+        print(f"  {addr:30s} {denom:5s} {net:15s} {phase}")
+PYEOF
+os_print_separator
