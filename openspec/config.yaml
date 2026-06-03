@@ -75,7 +75,16 @@ stacks:
     coverage_command: npm run test:coverage
     agent: ai-specs/.agents/stacks/frontend-react.md
     standards: ai-specs/specs/stacks/frontend-react-standards.mdc
-
+    
+  vault-smart-contracts:
+    label: Thought Machine Vault Smart Contracts
+    build_command: pip install -r requirements.txt
+    test_command: python -m pytest tests/ -v
+    run_command: vault-contract-validator validate contracts/
+    lint_command: ruff check . && mypy contracts/
+    coverage_command: pytest --cov=contracts --cov-report=html
+    agent: ai-specs/.agents/stacks/vault-smart-contracts.md
+    standards: ai-specs/specs/stacks/vault-smart-contracts-standards.mdc
 # ─────────────────────────────────────────────
 # AGENT REGISTRY
 # Defines how prompts are delivered to each AI assistant.
