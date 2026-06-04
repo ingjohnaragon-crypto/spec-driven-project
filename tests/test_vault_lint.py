@@ -1,12 +1,9 @@
 """Tests for vault_lint.py — Vault Python sandbox restriction linter."""
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent / ".openspec-cli" / "lib"))
-
-from vault_lint import Violation, lint_directory, lint_file, main  # noqa: E402
+from vault_lint import Violation, lint_directory, lint_file, main
 
 
 def _write(tmp_path: Path, code: str, name: str = "contract.py") -> Path:
@@ -152,6 +149,12 @@ def test_should_fail_when_contract_has_mutable_global_list(tmp_path: Path) -> No
 
 def test_should_not_flag_mutable_local_inside_function(tmp_path: Path) -> None:
     code = "def hook(vault, args):\n    local_cache = {}\n    return local_cache\n"
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_not_flag_mutable_local_inside_async_function(tmp_path: Path) -> None:
+    code = "async def hook(vault, args):\n    local_cache = {}\n    return local_cache\n"
     violations = lint_source(tmp_path, code)
     assert violations == []
 

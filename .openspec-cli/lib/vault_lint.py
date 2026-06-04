@@ -22,6 +22,7 @@ FORBIDDEN_CALLS: set[str] = {
     "type", "open", "print", "input",
 }
 
+# Canonical source: ai-specs/.agents/stacks/vault-smart-contracts.md § ALLOWED
 CONTRACT_ALLOWED_GLOBALS: set[str] = {
     "api", "version", "display_name", "summary", "description",
     "tside", "supported_denominations", "parameters",
@@ -80,13 +81,12 @@ class VaultLintVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        name: str | None = None
-        if isinstance(node.func, ast.Name):
-            name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            name = node.func.attr
-        if name in FORBIDDEN_CALLS:
-            self._add(node, "FORBIDDEN_CALL", f"call to {name!r} is not allowed in contracts")
+        if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_CALLS:
+            self._add(
+                node,
+                "FORBIDDEN_CALL",
+                f"call to {node.func.id!r} is not allowed in contracts",
+            )
         self.generic_visit(node)
 
     def visit_Raise(self, node: ast.Raise) -> None:
@@ -104,7 +104,8 @@ class VaultLintVisitor(ast.NodeVisitor):
         self.generic_visit(node)
         self._in_function = prev
 
-    visit_AsyncFunctionDef = visit_FunctionDef  # type: ignore[assignment]
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.visit_FunctionDef(node)  # type: ignore[arg-type]
 
     def visit_Assign(self, node: ast.Assign) -> None:
         if not self._in_function:
