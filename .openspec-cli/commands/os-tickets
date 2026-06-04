@@ -1,10 +1,4 @@
 #!/usr/bin/bash
-# os-tickets — List Jira tickets for the active project
-# Usage:
-#   os-tickets                    # all tickets
-#   os-tickets "In Progress"      # filter by status
-#   os-tickets "To Do"
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +6,10 @@ OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
+
+# Asegurar que OS_REPO_ROOT apunta al directorio actual del repo
+export OS_REPO_ROOT="$(pwd)"
+os_load_env
 source "${OS_CLI_LIB}/jira.sh"
 
 STATUS_FILTER="${1:-}"
