@@ -75,7 +75,7 @@ stacks:
     coverage_command: npm run test:coverage
     agent: ai-specs/.agents/stacks/frontend-react.md
     standards: ai-specs/specs/stacks/frontend-react-standards.mdc
-    
+
   vault-smart-contracts:
     label: Thought Machine Vault Smart Contracts
     build_command: pip install -r requirements.txt
@@ -118,6 +118,7 @@ agents:
     delivery: cli
     command: aider
     args: --message
+
 
 # ─────────────────────────────────────────────
 # JIRA
