@@ -3,7 +3,7 @@ schema: spec-driven
 # ─────────────────────────────────────────────
 # ACTIVE STACK
 # ─────────────────────────────────────────────
-stack: python-fastapi
+stack: vault-smart-contracts
 
 # ─────────────────────────────────────────────
 # ACTIVE AGENT

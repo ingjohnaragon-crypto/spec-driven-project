@@ -1,10 +1,5 @@
 #!/bin/sh
 # os-review <PR-NUMBER>
-# ─────────────────────────────────────────────────────────────
-# Downloads the PR diff, loads the active stack context,
-# and builds a Copilot code review prompt.
-# Requires: gh (GitHub CLI)
-# ─────────────────────────────────────────────────────────────
 set -e
 
 PR_NUMBER="${1:-}"
@@ -12,42 +7,43 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/agent.sh"
 
 if [ -z "$PR_NUMBER" ]; then
-  os_error "Usage: os-review <PR-NUMBER>  (e.g. os-review 1)"
+  os_error "Usage: os-review <PR-NUMBER>"
   exit 1
 fi
 
 if ! command -v gh > /dev/null 2>&1; then
-  os_error "GitHub CLI (gh) not found."
-  os_info  "Install from: https://cli.github.com"
+  os_error "GitHub CLI (gh) not found — install from: https://cli.github.com"
   exit 1
 fi
 
-# ── Load config ──────────────────────────────────────────────
 os_load_config
+os_load_env
+os_load_agent
 os_print_config
 
 # ── Fetch PR metadata ────────────────────────────────────────
 os_step "Fetching PR #$PR_NUMBER metadata..."
+PR_JSON=$(gh pr view "$PR_NUMBER" \
+  --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles)
 
-PR_JSON=$(gh pr view "$PR_NUMBER" --json title,body,headRefName,baseRefName,author,additions,deletions,changedFiles 2>/dev/null)
-
-PR_TITLE=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['title'])")
-PR_BRANCH=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['headRefName'])")
-PR_BASE=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['baseRefName'])")
-PR_AUTHOR=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['author']['login'])")
-PR_ADDITIONS=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['additions'])")
-PR_DELETIONS=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['deletions'])")
-PR_FILES=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['changedFiles'])")
-PR_BODY=$(echo "$PR_JSON" | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d.get('body','No description.'))")
+PR_TITLE=$(echo "$PR_JSON"   | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['title'])")
+PR_BRANCH=$(echo "$PR_JSON"  | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['headRefName'])")
+PR_BASE=$(echo "$PR_JSON"    | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['baseRefName'])")
+PR_AUTHOR=$(echo "$PR_JSON"  | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['author']['login'])")
+PR_ADD=$(echo "$PR_JSON"     | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['additions'])")
+PR_DEL=$(echo "$PR_JSON"     | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['deletions'])")
+PR_FILES=$(echo "$PR_JSON"   | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d['changedFiles'])")
+PR_BODY=$(echo "$PR_JSON"    | py -X utf8 -c "import sys,json; d=json.load(sys.stdin); print(d.get('body','No description.'))")
 
 os_divider
 os_label "  PR #$PR_NUMBER: $PR_TITLE"
 os_divider
-os_info "Author     : $PR_AUTHOR"
-os_info "Branch     : $PR_BRANCH -> $PR_BASE"
-os_info "Changes    : +$PR_ADDITIONS / -$PR_DELETIONS across $PR_FILES files"
+os_info "Author  : $PR_AUTHOR"
+os_info "Branch  : $PR_BRANCH -> $PR_BASE"
+os_info "Changes : +$PR_ADD / -$PR_DEL across $PR_FILES files"
 os_divider
 
 # ── Download diff ────────────────────────────────────────────
@@ -55,35 +51,25 @@ os_step "Downloading PR diff..."
 DIFF_FILE="$OS_REPO_ROOT/.openspec-cli/.pr-diff.patch"
 gh pr diff "$PR_NUMBER" > "$DIFF_FILE" 2>/dev/null
 
-DIFF_LINES=$(wc -l < "$DIFF_FILE")
 DIFF_SIZE=$(wc -c < "$DIFF_FILE")
-os_success "Diff downloaded: $DIFF_LINES lines ($DIFF_SIZE bytes)"
+os_success "Diff: $(wc -l < "$DIFF_FILE") lines ($DIFF_SIZE bytes)"
 
-# Truncate if too large for Copilot context (>500KB)
 MAX_BYTES=500000
 if [ "$DIFF_SIZE" -gt "$MAX_BYTES" ]; then
-  os_warn "Diff is large ($DIFF_SIZE bytes) — truncating to first 500KB"
+  os_warn "Diff is large — truncating to 500KB"
   DIFF_CONTENT=$(head -c $MAX_BYTES "$DIFF_FILE")
   DIFF_CONTENT="$DIFF_CONTENT
-... [diff truncated — $(( DIFF_SIZE - MAX_BYTES )) bytes omitted]"
+... [truncated]"
 else
   DIFF_CONTENT=$(cat "$DIFF_FILE")
 fi
 
-# ── Load stack context ───────────────────────────────────────
-os_step "Loading stack agent and standards..."
+# ── Load context ─────────────────────────────────────────────
+AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
+STANDARDS_CONTENT="";[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
+BASE_STANDARDS="";   BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
+                     [ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
 
-AGENT_CONTENT=""
-[ -f "$OS_AGENT_PATH" ] && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
-
-STANDARDS_CONTENT=""
-[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
-
-BASE_STANDARDS=""
-BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
-[ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
-
-# Load plan if exists (for context)
 PLAN_CONTENT=""
 TICKET_ID=$(echo "$PR_BRANCH" | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
 if [ -n "$TICKET_ID" ]; then
@@ -91,139 +77,118 @@ if [ -n "$TICKET_ID" ]; then
   [ -f "$PLAN_FILE" ] && PLAN_CONTENT=$(cat "$PLAN_FILE")
 fi
 
-# ── Build review prompt ──────────────────────────────────────
-os_step "Building code review prompt..."
+# ── Build prompt ─────────────────────────────────────────────
+os_step "Building review prompt..."
 
-PROMPT="You are acting as an expert code reviewer for an openspec project.
-Your role is to review the following Pull Request following the active stack
-standards and architectural principles.
+PROMPT="You are an expert code reviewer for an openspec project.
+Review the following Pull Request against the active stack standards.
 
-## PR Information
-- PR Number  : #$PR_NUMBER
-- Title      : $PR_TITLE
-- Author     : $PR_AUTHOR
-- Branch     : $PR_BRANCH -> $PR_BASE
-- Changes    : +$PR_ADDITIONS / -$PR_DELETIONS across $PR_FILES files
+## PR #$PR_NUMBER — $PR_TITLE
+Author  : $PR_AUTHOR
+Branch  : $PR_BRANCH -> $PR_BASE
+Changes : +$PR_ADD / -$PR_DEL across $PR_FILES files
 
 ## PR Description
 $PR_BODY
 
 ## Active Stack
 Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Build    : $OS_BUILD_CMD
 Test     : $OS_TEST_CMD
 Coverage : $OS_COVERAGE_CMD
 
 ---
-
-## Base Standards (apply always)
+## Base Standards
 $BASE_STANDARDS
 
 ---
-
-## Stack Agent (architectural role)
+## Stack Agent
 $AGENT_CONTENT
 
 ---
-
-## Stack Standards (conventions to enforce)
+## Stack Standards
 $STANDARDS_CONTENT"
 
 if [ -n "$PLAN_CONTENT" ]; then
   PROMPT="$PROMPT
 
 ---
-
-## Implementation Plan (what was planned for $TICKET_ID)
+## Implementation Plan ($TICKET_ID)
 $PLAN_CONTENT"
 fi
 
 PROMPT="$PROMPT
 
 ---
-
-## Pull Request Diff
+## PR Diff
 \`\`\`diff
 $DIFF_CONTENT
 \`\`\`
 
 ---
-
-## Your Review Task
-
-Analyze the diff above and provide a thorough code review. Structure your
-review in the following sections:
+## Review Task
 
 ### Summary
-One paragraph describing what this PR does and your overall assessment.
-Rate it: APPROVE / REQUEST_CHANGES / COMMENT
+One paragraph + overall verdict: APPROVE / REQUEST_CHANGES / COMMENT
 
 ### Architecture & Design
-- Does the code follow the DDD layered architecture?
-- Is there proper separation of concerns?
-- Are domain, application, and presentation layers respected?
-- Any architectural violations?
+- DDD layered architecture respected?
+- Separation of concerns correct?
 
 ### Code Quality
-- Naming conventions followed?
-- Are there code smells or duplication?
-- Is error handling complete and consistent?
-- Are all types explicit (no any / untyped)?
+- Naming, error handling, code smells?
 
 ### Testing
-- Are there sufficient tests for the changes?
-- Do tests cover happy path, error cases, and edge cases?
-- Is the 90% coverage threshold likely met?
-- Test naming and AAA pattern followed?
+- Sufficient tests? Coverage >= 90%? AAA pattern?
 
 ### Security
-- Any hardcoded secrets or credentials?
-- Input validation present?
-- No sensitive data in logs?
-
-### Documentation
-- Are relevant docs updated (api-spec.yml, data-model.md)?
-- Are comments clear and in English?
+- Hardcoded secrets? Input validation? Sensitive data in logs?
 
 ### Specific Issues
-List each issue with:
-- **File**: path/to/file.ext (line N)
-- **Severity**: CRITICAL / MAJOR / MINOR / SUGGESTION
-- **Issue**: description
-- **Fix**: suggested correction
+For each issue:
+- **File**: path (line N) — **Severity**: CRITICAL/MAJOR/MINOR — **Fix**: suggestion
 
 ### What's Done Well
-Highlight 2-3 things the author did particularly well.
+2-3 highlights.
 
-### Checklist
-- [ ] Architecture follows DDD layered pattern
-- [ ] Tests present and meaningful
-- [ ] Coverage >= 90%
-- [ ] No hardcoded secrets
-- [ ] Error handling complete
-- [ ] Documentation updated
-- [ ] Conventional commit messages
-- [ ] No commented-out code
+### Final Verdict
+**APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**"
 
-End with a final verdict: **APPROVE**, **REQUEST CHANGES**, or **COMMENT ONLY**.
-If requesting changes, list the blocking issues clearly."
-
-# ── Save prompt ──────────────────────────────────────────────
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
+OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
-# ── Save and deliver prompt via active agent ─────────────────
-. "$HOME/.openspec/lib/agent.sh"
-os_load_agent
+os_divider
 
-# ── Summary ──────────────────────────────────────────────────
-os_divider
-os_divider
-os_label "  Next steps:"
-os_info  "1. Paste the prompt into Copilot Chat in VS Code"
-os_info  "2. Copilot will generate a structured code review"
-os_info  "3. Save Copilot output to: .openspec-cli/.review-output.md"
-os_info  "4. Then publish to GitHub:"
-os_info  "   os-review-apply $PR_NUMBER"
-os_deliver_prompt "$PROMPT_FILE"
+# ── Deliver and capture output ────────────────────────────────
+if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+  os_step "Sending review prompt to $OS_AGENT_LABEL..."
+  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
+  os_success "Review saved automatically!"
+  os_divider
+  os_info "Preview (first 15 lines):"
+  head -15 "$OUTPUT_FILE"
+  os_divider
+  os_info "Next step: os-review-apply $PR_NUMBER"
+else
+  printf '%s' "$PROMPT" | clip 2>/dev/null || true
+  os_success "Prompt copied to clipboard!"
+  os_info "1. Paste in $OS_AGENT_LABEL"
+  os_info "2. Copy the review output"
+  os_info "3. Press Enter here when ready..."
+  read -r _dummy
+  os_step "Paste the review (CTRL+Z + Enter to finish on Windows):"
+  OUTPUT=""
+  while IFS= read -r line 2>/dev/null; do
+    OUTPUT="${OUTPUT}${line}
+"
+  done
+  printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
+  os_success "Review saved to: .openspec-cli/.review-output.md"
+  os_divider
+  os_info "Preview (first 15 lines):"
+  head -15 "$OUTPUT_FILE"
+  os_divider
+  os_info "Next step: os-review-apply $PR_NUMBER"
+fi
+
 os_divider
