@@ -1,10 +1,4 @@
 #!/usr/bin/bash
-# os-transition — Move a Jira ticket to a new status
-# Usage:
-#   os-transition KAN-15 "In Progress"
-#   os-transition KAN-15 done
-#   os-transition KAN-15 --list
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,6 +6,8 @@ OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
+export OS_REPO_ROOT="$(pwd)"
+os_load_env
 source "${OS_CLI_LIB}/jira.sh"
 
 TICKET_ID="${1:-}"
@@ -19,8 +15,6 @@ TRANSITION="${2:-}"
 
 if [ -z "$TICKET_ID" ]; then
   os_error "Usage: os-transition <TICKET-ID> <status|--list>"
-  os_info  "  os-transition KAN-15 --list"
-  os_info  "  os-transition KAN-15 \"In Progress\""
   exit 1
 fi
 
