@@ -1,0 +1,114 @@
+#!/usr/bin/bash
+# os-create-ticket — Create a Jira ticket from the terminal
+# Usage:
+#   os-create-ticket                           # interactive
+#   os-create-ticket --hu                      # AI-generated user story
+#   os-create-ticket "Fix overdraft" Bug       # quick create
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+source "${OS_CLI_LIB}/jira.sh"
+
+GENERATE_HU=false
+QUICK_SUMMARY=""
+QUICK_TYPE=""
+
+for arg in "$@"; do
+  case "$arg" in
+    --hu) GENERATE_HU=true ;;
+    *)
+      if [ -z "$QUICK_SUMMARY" ]; then QUICK_SUMMARY="$arg"
+      elif [ -z "$QUICK_TYPE" ];   then QUICK_TYPE="$arg"
+      fi
+      ;;
+  esac
+done
+
+PROJECT_KEY="${JIRA_PROJECT_KEY:-KAN}"
+
+os_divider
+os_label "  OpenSpec — Create Jira Ticket"
+os_divider
+os_info "Project : $PROJECT_KEY"
+os_info "Mode    : $([ "$GENERATE_HU" = true ] && echo 'AI User Story (--hu)' || echo 'Manual')"
+os_divider
+
+# ── Collect input ─────────────────────────────────────────────
+if [ -n "$QUICK_SUMMARY" ]; then
+  SUMMARY="$QUICK_SUMMARY"
+  TYPE="${QUICK_TYPE:-Task}"
+else
+  printf "Summary    : "; read -r SUMMARY
+  printf "Type [Story/Bug/Task] (default: Story): "; read -r TYPE
+  TYPE="${TYPE:-Story}"
+fi
+
+# ── Generate user story with AI if --hu ──────────────────────
+if [ "$GENERATE_HU" = "true" ]; then
+  os_step "Generating user story with AI..."
+
+  PROMPT="Generate a complete Jira user story for a Vault Smart Contract project.
+
+Title: $SUMMARY
+Stack: vault-smart-contracts (Thought Machine Vault, API 4.0)
+Project context: OpenSpec — spec-driven development framework for Vault Smart Contracts
+
+Write ONLY the user story content using this format:
+
+## User Story
+As a [role], I want [capability], so that [benefit].
+
+## Acceptance Criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+- [ ] Criterion 3
+- [ ] os-vault-test passes (all tests green)
+- [ ] os-vault-test --coverage passes (>= 90%)
+- [ ] Contract respects Vault Python sandbox restrictions
+
+## Technical Notes
+- Vault hooks involved: list the relevant hooks
+- contracts_api types needed: list the types
+- Files: contracts/<name>.py + tests/test_<name>.py
+
+## Definition of Done
+- [ ] os-vault-test 100% green
+- [ ] Coverage >= 90%
+- [ ] PR reviewed and approved
+- [ ] Jira ticket moved to Done"
+
+  # Save prompt and deliver to agent
+  echo "$PROMPT" > "${OS_REPO_ROOT}/.openspec-cli/.last-prompt.md"
+
+  if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+    DESCRIPTION=$(echo "$PROMPT" | ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} 2>/dev/null || echo "")
+    if [ -z "$DESCRIPTION" ]; then
+      os_warn "AI did not return output. Paste description manually (CTRL+D to finish):"
+      DESCRIPTION=$(cat)
+    fi
+  else
+    echo "$PROMPT" | clip 2>/dev/null || true
+    os_info "Prompt copied to clipboard — paste in your AI agent."
+    os_info "Then paste the AI output here (CTRL+D when done):"
+    DESCRIPTION=$(cat)
+  fi
+else
+  printf "Description (CTRL+D when done):\n"
+  DESCRIPTION=$(cat)
+  DESCRIPTION="${DESCRIPTION:-No description provided.}"
+fi
+
+# ── Create the ticket ─────────────────────────────────────────
+os_jira_create_ticket "$PROJECT_KEY" "$SUMMARY" "$TYPE" "$DESCRIPTION"
+
+os_divider
+os_info "Next steps:"
+os_info "  os-enrich  $CREATED_TICKET_KEY   # enrich with technical detail"
+os_info "  os-plan    $CREATED_TICKET_KEY   # generate implementation plan"
+os_info "  os-develop $CREATED_TICKET_KEY   # create branch + implement"
+os_divider

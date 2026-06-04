@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# os-vault-test — Run Vault Smart Contract tests locally using the contracts_api SDK
+# Usage:
+#   os-vault-test                  # runs all tests in tests/
+#   os-vault-test tests/test_savings_product.py   # specific file
+#   os-vault-test --coverage       # with HTML coverage report
+#
+# Requires: py -m pip install contracts_api (from contracts_sdk/)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+TEST_TARGET="${1:-tests/}"
+COVERAGE=false
+
+# Parse flags
+for arg in "$@"; do
+    case $arg in
+        --coverage) COVERAGE=true ;;
+    esac
+done
+
+os_print_separator
+os_print_header "OpenSpec — Vault Smart Contract Tests"
+os_print_separator
+os_print_info "Stack     : ${OS_STACK_LABEL:-vault-smart-contracts}"
+os_print_info "SDK       : contracts_api (local)"
+os_print_info "Target    : ${TEST_TARGET}"
+os_print_separator
+
+# Verify contracts_api is installed
+if ! "${OS_PYTHON}" -c "from contracts_api import SmartContractDescriptor" 2>/dev/null; then
+    os_print_error "contracts_api not installed. Run:"
+    os_print_info  "  cd contracts_sdk/contracts_sdk && py -m pip install ."
+    exit 1
+fi
+
+os_step "Running tests..."
+
+if [ "${COVERAGE}" = "true" ]; then
+    "${OS_PYTHON}" -m pytest "${TEST_TARGET}" -v \
+        --cov=contracts \
+        --cov-report=term-missing \
+        --cov-report=html:htmlcov \
+        --cov-fail-under=90
+    os_print_success "Coverage report: htmlcov/index.html"
+else
+    "${OS_PYTHON}" -m pytest "${TEST_TARGET}" -v
+fi
+
+os_print_separator
