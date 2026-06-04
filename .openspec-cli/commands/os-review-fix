@@ -1,0 +1,261 @@
+#!/bin/sh
+# os-review-fix <PR-NUMBER>
+# ─────────────────────────────────────────────────────────────
+# Reads the existing review (.review-output.md), extracts issues,
+# sends a fix prompt to the active agent, runs tests, commits the
+# fixes, generates a new review and publishes it automatically.
+#
+# Usage:
+#   os-review-fix 9          # fix + re-review PR #9
+#   os-review-fix 9 --no-commit  # fix only, no auto-commit
+# ─────────────────────────────────────────────────────────────
+set -e
+
+PR_NUMBER="${1:-}"
+AUTO_COMMIT=true
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-commit) AUTO_COMMIT=false ;;
+  esac
+done
+
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/agent.sh"
+
+if [ -z "$PR_NUMBER" ]; then
+  os_error "Usage: os-review-fix <PR-NUMBER> [--no-commit]"
+  exit 1
+fi
+
+os_load_config
+os_load_env
+os_load_agent
+cd "$OS_REPO_ROOT"
+
+REVIEW_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
+
+if [ ! -f "$REVIEW_FILE" ] || [ ! -s "$REVIEW_FILE" ]; then
+  os_error "No review found at .openspec-cli/.review-output.md"
+  os_info  "Run: os-review $PR_NUMBER first"
+  exit 1
+fi
+
+os_divider
+os_label "  OpenSpec — Review Fix Loop"
+os_divider
+os_info "PR        : #$PR_NUMBER"
+os_info "Agent     : $OS_AGENT_LABEL"
+os_info "Auto-commit: $AUTO_COMMIT"
+os_divider
+
+# ── Parse verdict from review ─────────────────────────────────
+VERDICT=$(py -X utf8 -c "
+import sys, re
+content = open('$REVIEW_FILE', encoding='utf-8').read()
+# Look for verdict patterns
+patterns = [
+    r'\*\*REQUEST CHANGES\*\*',
+    r'\*\*APPROVE\*\*',
+    r'\*\*COMMENT ONLY\*\*',
+    r'REQUEST.CHANGES',
+    r'APPROVE',
+]
+for pat in patterns:
+    m = re.search(pat, content, re.IGNORECASE)
+    if m:
+        txt = m.group(0).upper().replace('*','').strip()
+        if 'REQUEST' in txt or 'CHANGES' in txt:
+            print('REQUEST_CHANGES')
+        elif 'APPROVE' in txt:
+            print('APPROVE')
+        else:
+            print('COMMENT')
+        sys.exit(0)
+print('UNKNOWN')
+" 2>/dev/null || echo "UNKNOWN")
+
+os_info "Verdict: $VERDICT"
+
+if [ "$VERDICT" = "APPROVE" ]; then
+  os_success "Review already approved — no fixes needed!"
+  os_info "Run: gh pr merge $PR_NUMBER --squash"
+  exit 0
+fi
+
+os_divider
+os_step "Extracting issues from review..."
+
+# Extract specific issues section
+ISSUES=$(py -X utf8 -c "
+import re
+content = open('$REVIEW_FILE', encoding='utf-8').read()
+
+# Try to extract 'Specific Issues' section
+m = re.search(
+    r'#{1,3}\s*Specific Issues?\s*\n(.*?)(?=\n#{1,3}|\Z)',
+    content, re.DOTALL | re.IGNORECASE
+)
+if m:
+    print(m.group(1).strip())
+else:
+    # Fallback: find lines with CRITICAL/MAJOR/MINOR
+    lines = [l for l in content.split('\n')
+             if any(s in l.upper() for s in
+                    ['CRITICAL','MAJOR','MINOR','FILE:','FIX:','ISSUE:'])]
+    print('\n'.join(lines[:30]))
+" 2>/dev/null || echo "See full review in .review-output.md")
+
+os_info "Issues found:"
+echo "$ISSUES" | head -20 | sed 's/^/  /'
+os_divider
+
+# ── Load context for fix prompt ───────────────────────────────
+AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
+STANDARDS_CONTENT="";[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
+
+TICKET_ID=$(gh pr view "$PR_NUMBER" --json headRefName \
+  | py -X utf8 -c "import sys,json; b=json.load(sys.stdin)['headRefName']; \
+    import re; m=re.search(r'[A-Z]+-[0-9]+',b); print(m.group(0) if m else '')" \
+  2>/dev/null || echo "")
+
+FULL_REVIEW=$(cat "$REVIEW_FILE")
+
+# ── Build fix prompt ──────────────────────────────────────────
+os_step "Building fix prompt..."
+
+FIX_PROMPT="You are acting as the backend-developer agent for an openspec project.
+A code review has been completed for PR #$PR_NUMBER and changes are requested.
+Your task is to fix ALL the issues identified in the review below.
+
+## Active Stack
+Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Test     : $OS_TEST_CMD
+Coverage : $OS_COVERAGE_CMD
+
+## Stack Agent (your role)
+$AGENT_CONTENT
+
+## Stack Standards
+$STANDARDS_CONTENT
+
+---
+## Code Review — Issues to Fix
+
+$FULL_REVIEW
+
+---
+## Your Fix Instructions
+
+1. Address EVERY issue marked as CRITICAL or MAJOR — these are blocking.
+2. Address MINOR issues and SUGGESTIONS where possible.
+3. Do NOT change functionality that was not flagged in the review.
+4. After fixing, ensure:
+   - All existing tests still pass: $OS_TEST_CMD
+   - Coverage remains >= 90%: $OS_COVERAGE_CMD
+   - No new linting errors: $OS_LINT_CMD
+5. Keep the same branch — do not create a new one.
+
+Fix the issues now. Start with CRITICAL, then MAJOR, then MINOR."
+
+FIX_PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.fix-prompt.md"
+printf '%s' "$FIX_PROMPT" > "$FIX_PROMPT_FILE"
+
+# ── Deliver fix prompt to agent ───────────────────────────────
+os_divider
+if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+  os_step "Sending fix prompt to $OS_AGENT_LABEL..."
+  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$FIX_PROMPT_FILE"
+  os_success "Agent completed fixes."
+else
+  printf '%s' "$FIX_PROMPT" | clip 2>/dev/null || true
+  os_success "Fix prompt copied to clipboard!"
+  os_info "1. Paste in $OS_AGENT_LABEL"
+  os_info "2. Let it fix all issues"
+  os_info "3. Press Enter when done..."
+  read -r _dummy
+fi
+
+# ── Run tests ─────────────────────────────────────────────────
+os_divider
+os_step "Running tests to verify fixes..."
+
+if $OS_TEST_CMD 2>&1; then
+  os_success "All tests pass after fixes!"
+else
+  os_error "Tests failed after fixes — review the errors above."
+  os_warn  "Fix the failing tests before proceeding."
+  exit 1
+fi
+
+# ── Auto-commit fixes ─────────────────────────────────────────
+if [ "$AUTO_COMMIT" = "true" ]; then
+  os_divider
+  os_step "Committing fixes..."
+
+  STAGED=$(git status --porcelain | grep -v '^??' | wc -l | tr -d ' ')
+  UNTRACKED=$(git status --porcelain | grep '^??' | wc -l | tr -d ' ')
+
+  if [ "$STAGED" -eq 0 ] && [ "$UNTRACKED" -eq 0 ]; then
+    os_warn "No changes to commit — agent may have already fixed in place."
+  else
+    git add -u
+    # Stage new files excluding secrets
+    for f in $(git status --porcelain | grep '^??' | awk '{print $2}'); do
+      case "$f" in
+        .env|*.env|*.secret) os_warn "Skipping: $f" ;;
+        *) git add "$f" ;;
+      esac
+    done
+
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ -n "$TICKET_ID" ]; then
+      MSG="fix(review): address PR #$PR_NUMBER feedback for $TICKET_ID"
+    else
+      MSG="fix(review): address PR #$PR_NUMBER feedback"
+    fi
+
+    git commit -m "$MSG" -m "- Fixes issues identified in code review
+- All tests pass post-fix
+- Stack: $OS_ACTIVE_STACK"
+
+    git push origin "$CURRENT_BRANCH"
+    os_success "Fixes committed and pushed: $MSG"
+  fi
+fi
+
+# ── Generate new review ───────────────────────────────────────
+os_divider
+os_step "Generating new review of updated PR..."
+"$CLI_DIR/bin/os-review" "$PR_NUMBER"
+
+# ── Publish new review ────────────────────────────────────────
+os_divider
+os_step "Publishing updated review to GitHub..."
+"$CLI_DIR/bin/os-review-apply" "$PR_NUMBER"
+
+os_divider
+os_success "Fix loop complete!"
+os_info "Check the PR: gh pr view $PR_NUMBER --web"
+os_divider
+
+# ─────────────────────────────────────────────────────────────
+# UPDATE os-review-apply to support --fix flag
+# Add these lines at the END of os-review-apply, before the
+# final os_divider, to enable: os-review-apply 9 --fix
+# ─────────────────────────────────────────────────────────────
+# AUTO_FIX section (add to os-review-apply):
+#
+# AUTO_FIX=false
+# for arg in "$@"; do
+#   case "$arg" in --fix) AUTO_FIX=true ;; esac
+# done
+#
+# After publishing the review:
+# if [ "$AUTO_FIX" = "true" ] && [ "$VERDICT" = "REQUEST_CHANGES" ]; then
+#   os_divider
+#   os_info "Verdict is REQUEST CHANGES — launching fix loop..."
+#   "$CLI_DIR/bin/os-review-fix" "$PR_NUMBER"
+# fi
