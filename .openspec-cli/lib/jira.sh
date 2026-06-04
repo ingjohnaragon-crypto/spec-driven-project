@@ -116,3 +116,111 @@ os_jira_transition() {
     os_warn "Could not transition ticket (HTTP $result)"
   fi
 }
+
+
+# ── Create a Jira ticket ─────────────────────────────────────
+# Usage: os_jira_create_ticket <project_key> <summary> <type> <description>
+os_jira_create_ticket() {
+  _project="$1"
+  _summary="$2"
+  _type="${3:-Story}"
+  _desc="$4"
+
+  os_step "Creating $_type in project $_project..."
+
+  _payload=$(py -c "
+import json, sys
+
+summary     = sys.argv[1]
+description = sys.argv[2]
+project     = sys.argv[3]
+issuetype   = sys.argv[4]
+
+paragraphs = []
+for para in description.split('\n\n'):
+    para = para.strip()
+    if para:
+        paragraphs.append({
+            'type': 'paragraph',
+            'content': [{'type': 'text', 'text': para}]
+        })
+
+body = {
+    'fields': {
+        'project':     {'key': project},
+        'summary':     summary,
+        'issuetype':   {'name': issuetype},
+        'description': {
+            'type':    'doc',
+            'version': 1,
+            'content': paragraphs or [
+                {'type': 'paragraph',
+                 'content': [{'type': 'text', 'text': description}]}
+            ]
+        }
+    }
+}
+print(json.dumps(body))
+" "$_summary" "$_desc" "$_project" "$_type")
+
+  _response=$(curl -s \
+    -X POST \
+    -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+    -H "Accept: application/json" \
+    -H "Content-Type: application/json" \
+    -d "$_payload" \
+    "$JIRA_BASE_URL/rest/api/3/issue")
+
+  if echo "$_response" | grep -q '"id"'; then
+    CREATED_TICKET_KEY=$(echo "$_response" | py -c \
+      "import sys,json; print(json.load(sys.stdin)['key'])" 2>/dev/null)
+    CREATED_TICKET_URL="$JIRA_BASE_URL/browse/$CREATED_TICKET_KEY"
+    export CREATED_TICKET_KEY CREATED_TICKET_URL
+    os_success "Created: $CREATED_TICKET_KEY"
+    os_info "URL: $CREATED_TICKET_URL"
+  else
+    _err=$(echo "$_response" | py -c \
+      "import sys,json; d=json.load(sys.stdin); print(d.get('errorMessages',['Unknown'])[0])" \
+      2>/dev/null || echo "$_response")
+    os_error "Could not create ticket: $_err"
+    return 1
+  fi
+}
+
+# ── List tickets in a project ────────────────────────────────
+# Usage: os_jira_list_tickets <project_key> [status]
+os_jira_list_tickets() {
+  _project="$1"
+  _status="${2:-}"
+
+  if [ -n "$_status" ]; then
+    _jql="project=$_project AND status=\"$_status\" ORDER BY created DESC"
+  else
+    _jql="project=$_project ORDER BY created DESC"
+  fi
+
+  curl -s \
+    -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+    -H "Accept: application/json" \
+    -G \
+    --data-urlencode "jql=$_jql" \
+    --data-urlencode "fields=summary,status,issuetype,assignee" \
+    --data-urlencode "maxResults=20" \
+    "$JIRA_BASE_URL/rest/api/3/search/jql" \
+  | py -c "
+import sys, json
+data   = json.load(sys.stdin)
+issues = data.get('issues', [])
+if not issues:
+    print('  No tickets found.')
+else:
+    for issue in issues:
+        f      = issue['fields']
+        key    = issue['key']
+        summ   = f['summary'][:55]
+        status = f['status']['name']
+        itype  = f['issuetype']['name']
+        print(f'  {key:<12} [{status:<16}] {itype:<12} {summ}')
+" 2>/dev/null
+}
+
