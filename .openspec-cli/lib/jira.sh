@@ -145,7 +145,7 @@ for para in description.split('\n\n'):
             'content': [{'type': 'text', 'text': para}]
         })
 
-body = {
+body = 
     'fields': {
         'project':     {'key': project},
         'summary':     summary,
@@ -206,7 +206,7 @@ os_jira_list_tickets() {
     --data-urlencode "jql=$_jql" \
     --data-urlencode "fields=summary,status,issuetype,assignee" \
     --data-urlencode "maxResults=20" \
-    "$JIRA_BASE_URL/rest/api/3/search/jql" \
+    "$JIRA_BASE_URL/rest/api/3/search" \
   | py -c "
 import sys, json
 data   = json.load(sys.stdin)
