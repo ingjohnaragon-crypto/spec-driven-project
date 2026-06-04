@@ -352,6 +352,50 @@ ruff check .
 mypy src
 ```
 
+### Validate Vault sandbox restrictions (os-vault-lint)
+
+`os-vault-lint` scans `contracts/*.py` files using Python's `ast` module and reports
+any Vault sandbox violations before tests run. It uses only Python standard library —
+no additional packages required.
+
+```bash
+# Lint the entire contracts/ directory (default)
+python .openspec-cli/lib/vault_lint.py contracts/
+
+# Lint a single file
+python .openspec-cli/lib/vault_lint.py contracts/savings_product.py
+
+# Via the CLI wrapper (after install)
+os-vault-lint
+os-vault-lint contracts/savings_product.py
+```
+
+**Exit codes**: `0` = no violations, `1` = violations found or target not found.
+
+**Output format** (one line per violation):
+```
+contracts/foo.py:12 [FORBIDDEN_IMPORT] import 'os' is not allowed
+contracts/foo.py:34 [FORBIDDEN_CALL] call to 'eval' is not allowed in contracts
+contracts/foo.py:56 [EXCEPTION_CHAINING] 'raise ... from ...' is not allowed in contracts
+```
+
+**Rules enforced**:
+
+| Rule ID | Trigger |
+|---|---|
+| `FORBIDDEN_IMPORT` | `import` or `from ... import` of a banned stdlib module |
+| `UNKNOWN_IMPORT` | Any import not from `contracts_api` or `decimal` |
+| `FORBIDDEN_CALL` | Call to `eval`, `exec`, `open`, `print`, `getattr`, `setattr`, `hasattr`, `delattr`, `type`, `globals`, `locals`, `vars`, `dir`, `compile`, `__import__`, `input` |
+| `EXCEPTION_CHAINING` | `raise X from Y` syntax |
+| `MUTABLE_GLOBAL` | Module-level `list`, `dict`, or `set` literal not in the allowed contract metadata names |
+
+`os-vault-test` automatically runs `os-vault-lint` before executing pytest. To run
+lint tests with coverage:
+
+```bash
+pytest tests/test_vault_lint.py --cov=vault_lint --cov-fail-under=90
+```
+
 ---
 
 ## �🗄️ Database Migrations (Flyway)

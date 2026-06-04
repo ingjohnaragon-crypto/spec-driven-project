@@ -40,6 +40,12 @@ if ! "${OS_PYTHON}" -c "from contracts_api import SmartContractDescriptor" 2>/de
     exit 1
 fi
 
+os_step "Running Vault lint pre-check..."
+"${SCRIPT_DIR}/os-vault-lint" "contracts/" || {
+    os_error "Lint failed — fix sandbox violations before running tests."
+    exit 1
+}
+
 os_step "Running tests..."
 
 if [ "${COVERAGE}" = "true" ]; then
