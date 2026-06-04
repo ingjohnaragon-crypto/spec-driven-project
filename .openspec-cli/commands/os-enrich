@@ -1,10 +1,5 @@
 #!/bin/sh
 # os-enrich <TICKET-ID>
-# ─────────────────────────────────────────────────────────────
-# Fetches a Jira ticket and builds a Copilot prompt to enrich
-# it with technical detail (endpoints, files, steps, NFRs).
-# The enriched content is ready to paste back into Jira.
-# ─────────────────────────────────────────────────────────────
 set -e
 
 TICKET_ID="${1:-}"
@@ -13,49 +8,38 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
+. "$CLI_DIR/lib/agent.sh"
 
 if [ -z "$TICKET_ID" ]; then
-  os_error "Usage: os-enrich <TICKET-ID>  (e.g. os-enrich KAN-42)"
+  os_error "Usage: os-enrich <TICKET-ID>"
   exit 1
 fi
 
-# ── Load config ──────────────────────────────────────────────
 os_load_config
 os_load_env
+os_load_agent
 os_print_config
-
-# ── Fetch ticket ─────────────────────────────────────────────
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
 
 # ── Load context ─────────────────────────────────────────────
-AGENT_CONTENT=""
-[ -f "$OS_AGENT_PATH" ] && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
-
-STANDARDS_CONTENT=""
-[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
-
-API_SPEC=""
-API_FILE="$OS_REPO_ROOT/ai-specs/specs/api-spec.yml"
-[ -f "$API_FILE" ] && API_SPEC=$(cat "$API_FILE")
-
-DATA_MODEL=""
-DM_FILE="$OS_REPO_ROOT/ai-specs/specs/data-model.md"
-[ -f "$DM_FILE" ] && DATA_MODEL=$(cat "$DM_FILE")
-
-ENRICH_TEMPLATE=""
-CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/enrich-us.md"
-[ -f "$CMD_FILE" ] && ENRICH_TEMPLATE=$(cat "$CMD_FILE" \
-  | sed "s|\$ARGUMENTS|$TICKET_ID|g")
+AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
+STANDARDS_CONTENT="";[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
+API_SPEC="";          API_FILE="$OS_REPO_ROOT/ai-specs/specs/api-spec.yml"
+                      [ -f "$API_FILE" ] && API_SPEC=$(cat "$API_FILE")
+DATA_MODEL="";        DM_FILE="$OS_REPO_ROOT/ai-specs/specs/data-model.md"
+                      [ -f "$DM_FILE" ] && DATA_MODEL=$(cat "$DM_FILE")
+ENRICH_TEMPLATE="";   CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/enrich-us.md"
+                      [ -f "$CMD_FILE" ] && ENRICH_TEMPLATE=$(cat "$CMD_FILE" | sed "s|\$ARGUMENTS|$TICKET_ID|g")
 
 # ── Build prompt ─────────────────────────────────────────────
 os_step "Building enrichment prompt..."
 
 PROMPT=$(cat << PROMPT_EOF
 You are acting as a product expert with technical knowledge for an openspec project.
-Your task is to enrich the following Jira ticket with the technical detail a developer
-needs to be fully autonomous — no back-and-forth required.
+Enrich the following Jira ticket with the technical detail a developer needs to be
+fully autonomous — no back-and-forth required.
 
 ## Active Stack
 Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
@@ -70,67 +54,81 @@ Assignee: $JIRA_ASSIGNEE
 $JIRA_DESCRIPTION
 
 ---
-
 ## Stack Agent (technical context)
 $AGENT_CONTENT
 
 ---
-
 ## Stack Standards
 $STANDARDS_CONTENT
 
 ---
-
 ## Current API Spec
 $API_SPEC
 
 ---
-
 ## Current Data Model
 $DATA_MODEL
 
 ---
-
 ## Your Task
 $ENRICH_TEMPLATE
 
 ---
-
 ## Output Instructions
-Produce two clearly separated sections:
-
-### [original]
-Reproduce the original description verbatim — do not change it.
-
-### [enhanced]
-Write an improved, technically detailed version that includes:
+Produce ONLY the enhanced description in markdown — no preamble, no explanation.
+Include:
 - Full description of the functionality
-- Comprehensive list of fields to create or update
+- Fields to create or update
 - Endpoint URLs, HTTP methods, request/response shapes
-- Files to create or modify (with their layer in the architecture)
-- Acceptance criteria / steps to consider the task complete
+- Files to create or modify (with their architecture layer)
+- Acceptance criteria
 - Unit test cases to cover
-- Non-functional requirements (security, performance, validation rules)
+- Non-functional requirements (security, performance, validation)
 
-Use markdown formatting (headers, bullet lists, code blocks where helpful).
 Write everything in English.
 PROMPT_EOF
 )
 
-# ── Save and deliver prompt via active agent ─────────────────
-. "$HOME/.openspec/lib/agent.sh"
-os_load_agent
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
-echo "$PROMPT" > "$PROMPT_FILE"
+OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
+printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
-# ── Summary ──────────────────────────────────────────────────
 os_divider
-os_divider
-os_label "  Next steps:"
-os_info  "1. Paste the prompt into Copilot Chat"
-os_info  "2. Copy Copilot's [enhanced] output"
-os_info  "3. Paste it into the Jira ticket description"
-os_info  "     (after the [original] section)"
-os_info  "4. Optional: update ticket status in Jira manually"
-os_deliver_prompt "$PROMPT_FILE"
+
+# ── Deliver and capture output ────────────────────────────────
+if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+  # CLI agent — ejecuta y captura automáticamente
+  os_step "Sending prompt to $OS_AGENT_LABEL..."
+  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
+  os_success "Enriched content saved automatically!"
+  os_info "File: .openspec-cli/.enriched-content.md"
+  os_divider
+  os_info "Preview (first 10 lines):"
+  head -10 "$OUTPUT_FILE"
+  os_divider
+  os_info "Next step: os-enrich-apply $TICKET_ID"
+else
+  # Clipboard agent — copia prompt y espera que el usuario pegue el output
+  printf '%s' "$PROMPT" | clip 2>/dev/null || true
+  os_success "Prompt copied to clipboard!"
+  os_divider
+  os_info "1. Paste in $OS_AGENT_LABEL"
+  os_info "2. Copy the AI output"
+  os_info "3. Press Enter here when ready..."
+  read -r _dummy
+  os_step "Paste the enriched content (CTRL+Z + Enter to finish on Windows):"
+  OUTPUT=""
+  while IFS= read -r line 2>/dev/null; do
+    OUTPUT="${OUTPUT}${line}
+"
+  done
+  printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
+  os_success "Saved to: .openspec-cli/.enriched-content.md"
+  os_divider
+  os_info "Preview (first 10 lines):"
+  head -10 "$OUTPUT_FILE"
+  os_divider
+  os_info "Next step: os-enrich-apply $TICKET_ID"
+fi
+
 os_divider
