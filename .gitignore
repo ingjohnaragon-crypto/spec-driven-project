@@ -57,3 +57,21 @@ swagger.json
 .DS_Store
 Thumbs.db
 .env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.coverage
+htmlcov/
+.pytest_cache/
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# OpenSpec CLI internal state
+.openspec-cli/.*.applied
+.openspec-cli/.last-prompt.md
+.openspec-cli/.pr-diff.patch

@@ -25,6 +25,12 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pytest-cov
 
+      - name: Run Vault lint (sandbox restriction check)
+        run: python .openspec-cli/lib/vault_lint.py contracts/
+
+      - name: Run vault_lint unit tests
+        run: pytest tests/test_vault_lint.py -v --cov=vault_lint --cov-fail-under=90
+
       - name: Run Vault Smart Contract tests
         run: pytest tests/test_savings_product.py -v --cov=contracts --cov-report=xml --cov-fail-under=90
 
