@@ -1,58 +1,35 @@
 #!/bin/sh
 # os-plan <TICKET-ID>
-# ─────────────────────────────────────────────────────────────
-# Fetches a Jira ticket, resolves the active stack and agent,
-# and delivers the implementation plan prompt accordingly.
-# ─────────────────────────────────────────────────────────────
 set -e
-
 TICKET_ID="${1:-}"
 CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
 . "$CLI_DIR/lib/agent.sh"
 
 if [ -z "$TICKET_ID" ]; then
-  os_error "Usage: os-plan <TICKET-ID>  (e.g. os-plan KAN-42)"
+  os_error "Usage: os-plan <TICKET-ID>"
   exit 1
 fi
 
-# ── Load config and agent ────────────────────────────────────
 os_load_config
 os_load_env
 os_load_agent
-
 os_print_config
 os_print_agent
-
-# ── Fetch Jira ticket ────────────────────────────────────────
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
 
-# ── Load stack context ───────────────────────────────────────
 os_step "Loading stack agent and standards..."
-
 AGENT_CONTENT=""
-if [ -f "$OS_AGENT_PATH" ]; then
-  AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
-else
-  os_warn "Stack agent not found at $OS_AGENT_PATH — skipping"
-fi
-
+[ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
 STANDARDS_CONTENT=""
-if [ -f "$OS_STANDARDS_PATH" ]; then
-  STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
-else
-  os_warn "Stack standards not found at $OS_STANDARDS_PATH — skipping"
-fi
-
+[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
 BASE_STANDARDS=""
 BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
 [ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
-
 COMMAND_TEMPLATE=""
 CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/plan-backend-ticket.md"
 if [ -f "$CMD_FILE" ]; then
@@ -65,56 +42,70 @@ if [ -f "$CMD_FILE" ]; then
     | sed "s|\$ARGUMENTS|$TICKET_ID|g")
 fi
 
-# ── Build prompt ─────────────────────────────────────────────
 os_step "Building prompt..."
-
 PROMPT="You are acting as the backend-developer agent for an openspec project.
-
 ## Active Stack
 Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Build    : $OS_BUILD_CMD
 Test     : $OS_TEST_CMD
 Run      : $OS_RUN_CMD
 Coverage : $OS_COVERAGE_CMD
-
 ## Jira Ticket: $JIRA_TICKET_ID
 Type     : $JIRA_TYPE
 Status   : $JIRA_STATUS
 Summary  : $JIRA_SUMMARY
 Assignee : $JIRA_ASSIGNEE
-
 ### Description
 $JIRA_DESCRIPTION
-
 ---
-
 ## Base Standards
 $BASE_STANDARDS
-
 ---
-
 ## Stack Agent (your role)
 $AGENT_CONTENT
-
 ---
-
 ## Stack Standards
 $STANDARDS_CONTENT
-
 ---
-
 ## Your Task
 $COMMAND_TEMPLATE"
 
-# ── Save and deliver prompt ──────────────────────────────────
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
+OUTPUT_FILE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
+mkdir -p "$OS_REPO_ROOT/ai-specs/changes"
 
-NEXT_STEPS="1. Open $OS_AGENT_LABEL
-2. Paste the prompt
-3. The AI will generate the plan at:
-   ai-specs/changes/${TICKET_ID}_backend.md
-4. Review the plan, then run:
-   os-develop $TICKET_ID"
+os_divider
 
-os_deliver_prompt "$PROMPT_FILE" "$NEXT_STEPS"
+# ── Deliver and capture output ────────────────────────────────
+if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+  # CLI agent — ejecuta y captura output automáticamente
+  os_step "Sending prompt to $OS_AGENT_LABEL..."
+  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
+  os_success "Plan generated and saved automatically!"
+  os_info "File: ai-specs/changes/${TICKET_ID}_backend.md"
+else
+  # Clipboard agent — copia prompt y abre el archivo para pegar el output
+  printf '%s' "$PROMPT" | clip 2>/dev/null || true
+  os_success "Prompt copied to clipboard!"
+  os_info "1. Paste in $OS_AGENT_LABEL and run"
+  os_info "2. Copy the AI output"
+  os_info "3. Press Enter here when ready to paste..."
+  read -r _dummy
+
+  os_step "Paste the AI output below (CTRL+Z + Enter to finish on Windows):"
+  # Captura lo que el usuario pega y lo guarda directamente
+  OUTPUT=""
+  while IFS= read -r line; do
+    OUTPUT="${OUTPUT}${line}
+"
+  done
+  printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
+  os_success "Plan saved to: ai-specs/changes/${TICKET_ID}_backend.md"
+fi
+
+os_divider
+os_info "Plan saved — next step:"
+os_info "  cat ai-specs/changes/${TICKET_ID}_backend.md"
+os_info "  os-develop $TICKET_ID"
+os_divider
