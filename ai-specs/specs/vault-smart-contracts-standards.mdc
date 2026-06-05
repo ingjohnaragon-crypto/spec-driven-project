@@ -1,0 +1,155 @@
+# Vault Smart Contracts — Standards
+
+## Language constraints (ENFORCED)
+
+Vault runs a **restricted Python sandbox**. These rules are non-negotiable.
+
+### Forbidden — causes runtime rejection
+
+```
+# No stdlib imports
+import os, sys, json, re, math, datetime, collections, functools,
+       itertools, random, hashlib, uuid, logging, requests, http
+
+# No dynamic execution
+eval(), exec(), __import__(), compile(), globals(), locals()
+
+# No I/O
+open(), print(), input()
+
+# No introspection
+getattr(), setattr(), type(), dir(), vars(), isinstance() [generic]
+
+# No mutable globals between hooks
+CACHE = {}  # state is lost between hook calls anyway
+
+# No network
+requests.get(), socket.connect()
+
+# No exception chaining
+raise X from Y
+```
+
+### Allowed
+
+```python
+# Built-ins
+str, int, float, bool, list, dict, tuple, set
+len(), range(), enumerate(), zip(), sorted(), sum(), min(), max(), abs(), round()
+list/dict comprehensions, f-strings
+
+# Decimal — ALWAYS for money, NEVER float
+from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
+
+# Vault types only
+from contracts_api import (
+    BalanceCoordinate, Balance, BalanceDefaultDict,
+    Phase, Tside, Posting, CustomInstruction,
+    PostingInstructionsDirective, PostingInstructionsDirective,
+    Parameter, ParameterLevel, NumberShape, StringShape,
+    DenominationShape, UnionShape, UnionItem,
+    ScheduledEvent, SmartContractEventType, EndOfMonthSchedule,
+    Rejection, RejectionReason,
+    ActivationHookArguments, ActivationHookResult,
+    PrePostingHookArguments, PrePostingHookResult,
+    PostPostingHookArguments, PostPostingHookResult,
+    ScheduledEventHookArguments, ScheduledEventHookResult,
+)
+
+# Datetime — NEVER import datetime; use hook_arguments.effective_datetime
+effective_dt = hook_arguments.effective_datetime  # ZoneInfo-aware
+year  = effective_dt.year
+month = effective_dt.month
+```
+
+---
+
+## API 4.0 type signatures (verified against installed SDK)
+
+### Hook arguments
+
+| Class | Required params |
+|---|---|
+| `ActivationHookArguments` | `effective_datetime` (ZoneInfo) |
+| `PrePostingHookArguments` | `effective_datetime`, `posting_instructions`, `client_transactions` |
+| `PostPostingHookArguments` | `effective_datetime`, `posting_instructions`, `client_transactions` |
+| `ScheduledEventHookArguments` | `effective_datetime`, `event_type` |
+
+**CRITICAL**: `effective_datetime` must use `ZoneInfo("UTC")` — NOT `datetime.timezone.utc`
+
+```python
+# WRONG
+from datetime import timezone
+dt = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+# CORRECT
+from zoneinfo import ZoneInfo
+dt = datetime(2024, 1, 1, tzinfo=ZoneInfo("UTC"))
+```
+
+### Balance access — phase is on the KEY
+
+```python
+# API 4.0: posting.balances() returns {BalanceCoordinate: Balance}
+# Phase is on BalanceCoordinate (key), NOT on Balance (value)
+
+# WRONG
+for bal in posting.balances().values():
+    if bal.phase == Phase.COMMITTED:  # AttributeError: Balance has no 'phase'
+
+# CORRECT
+for coord, bal in posting.balances().items():
+    if coord.phase == Phase.COMMITTED:
+        total += bal.net
+```
+
+### CustomInstruction — no client_transaction_id
+
+```python
+# WRONG (API 3.x pattern)
+CustomInstruction(postings=[...], client_transaction_id="APPLY_INTEREST_123")
+
+# CORRECT (API 4.0) — use instruction_details for traceability
+CustomInstruction(
+    postings=[...],
+    instruction_details={
+        "description": "Monthly interest accrual",
+        "hook_execution_id": str(vault.get_hook_execution_id()),
+    },
+)
+```
+
+---
+
+## File structure
+
+```
+contracts/
+  <product_name>.py          # Smart Contract (snake_case)
+tests/
+  test_<product_name>.py     # Unit tests
+contracts_sdk/               # SDK directory (git-ignored binary)
+  contracts_sdk/             # Install from here: py -m pip install .
+```
+
+## Commands
+
+```bash
+os-stack vault-smart-contracts   # activate stack
+os-vault-test                    # run tests with SDK
+os-vault-test --coverage         # with coverage ≥ 90%
+os-vault-simulate contracts/<product>.py <start> <end> '<params_json>'
+os-vault-deploy contracts/<product>.py <product_id> "<display_name>"
+os-vault-account <product_version_id> <customer_id>
+os-vault-balances <account_id>
+```
+
+## Testing standards
+
+- All tests use `ZoneInfo("UTC")` for datetimes
+- `BalanceDefaultDict` keyed by `BalanceCoordinate`
+- `PrePostingHookArguments` requires `client_transactions={}`
+- No `paused_schedule_names` in `ScheduledEventHookArguments`
+- Always mock `vault.get_balances_observation().balances` not `vault.get_balance_timeseries()`
+- Coverage threshold: **≥ 90%**
+- Run: `py -m pytest tests/ -v --cov=contracts --cov-report=term-missing`

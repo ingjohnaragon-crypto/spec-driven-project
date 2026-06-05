@@ -1,0 +1,36 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+export OS_REPO_ROOT="$(pwd)"
+os_load_env
+source "${OS_CLI_LIB}/jira.sh"
+
+TICKET_ID="${1:-}"
+TRANSITION="${2:-}"
+
+if [ -z "$TICKET_ID" ]; then
+  os_error "Usage: os-transition <TICKET-ID> <status|--list>"
+  exit 1
+fi
+
+os_divider
+os_label "  OpenSpec — Jira Transition"
+os_divider
+
+if [ "$TRANSITION" = "--list" ] || [ -z "$TRANSITION" ]; then
+  os_info "Available transitions for $TICKET_ID:"
+  os_divider
+  os_jira_get_transitions "$TICKET_ID" | while IFS='|' read -r id name; do
+    os_info "  $name"
+  done
+  os_divider
+  printf "Move to: "; read -r TRANSITION
+fi
+
+os_jira_transition "$TICKET_ID" "$TRANSITION"
+os_divider

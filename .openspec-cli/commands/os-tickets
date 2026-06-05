@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+
+# Asegurar que OS_REPO_ROOT apunta al directorio actual del repo
+export OS_REPO_ROOT="$(pwd)"
+os_load_env
+source "${OS_CLI_LIB}/jira.sh"
+
+STATUS_FILTER="${1:-}"
+PROJECT_KEY="${JIRA_PROJECT_KEY:-KAN}"
+
+os_divider
+os_label "  OpenSpec — Jira Tickets  [$PROJECT_KEY]"
+os_divider
+[ -n "$STATUS_FILTER" ] && os_info "Filter: $STATUS_FILTER"
+
+os_jira_list_tickets "$PROJECT_KEY" "$STATUS_FILTER"
+os_divider

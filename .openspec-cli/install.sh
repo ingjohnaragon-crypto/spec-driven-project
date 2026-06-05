@@ -59,7 +59,7 @@ for cmd_file in "$REPO_CLI_DIR/commands"/os-*; do
     rm "$target"
   fi
 
-  ln -s "$cmd_file" "$target"
+  ln -sf "$cmd_file" "$target"
   chmod +x "$cmd_file"
   success "Linked: $cmd_name -> $target"
 done

@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────────────────────
 # Detects changed files, generates a conventional commit message,
 # stages only relevant files, commits, pushes and opens a PR.
-# Requires: git, gh (GitHub CLI)
+# ALWAYS works on a feature branch — never commits to develop/main.
 # ─────────────────────────────────────────────────────────────
 set -e
 
@@ -13,7 +13,6 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 
-# ── Load config ──────────────────────────────────────────────
 os_load_config
 os_load_env
 
@@ -23,15 +22,41 @@ cd "$OS_REPO_ROOT"
 CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
 os_info "Current branch: $CURRENT_BRANCH"
 
-# Try to extract ticket ID from branch name if not passed
+# Try to extract ticket ID from branch name if not provided
 if [ -z "$TICKET_ID" ]; then
   TICKET_ID=$(echo "$CURRENT_BRANCH" \
     | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
 fi
 
-if [ -z "$TICKET_ID" ]; then
-  os_warn "No ticket ID provided and none found in branch name."
-  os_warn "Commit message will not include a ticket reference."
+# ── Guard: never commit directly to protected branches ────────
+PROTECTED="main master develop"
+IS_PROTECTED=false
+for protected in $PROTECTED; do
+  if [ "$CURRENT_BRANCH" = "$protected" ]; then
+    IS_PROTECTED=true
+    break
+  fi
+done
+
+if [ "$IS_PROTECTED" = "true" ]; then
+  os_warn "You are on a protected branch: $CURRENT_BRANCH"
+  os_warn "OpenSpec never commits directly to $CURRENT_BRANCH."
+  os_divider
+
+  # Build feature branch name
+  if [ -n "$TICKET_ID" ]; then
+    FEATURE_BRANCH="feature/${TICKET_ID}-$(date +%Y%m%d)"
+  else
+    os_info "No ticket ID found. Enter branch name suffix:"
+    printf "feature/": read -r SUFFIX
+    FEATURE_BRANCH="feature/${SUFFIX}"
+  fi
+
+  os_step "Creating branch $FEATURE_BRANCH from $CURRENT_BRANCH..."
+  git pull origin "$CURRENT_BRANCH" --quiet
+  git checkout -b "$FEATURE_BRANCH"
+  os_success "Switched to: $FEATURE_BRANCH"
+  CURRENT_BRANCH="$FEATURE_BRANCH"
 fi
 
 # ── Check for changes ────────────────────────────────────────
@@ -48,13 +73,11 @@ os_label "  Changed files:"
 git status --short
 os_divider
 
-# ── Stage all relevant changes ───────────────────────────────
+# ── Stage relevant changes ───────────────────────────────────
 os_step "Staging changes (excluding secrets and build artifacts)..."
 
-# Stage tracked changes
 git add -u
 
-# Stage untracked files, skipping known non-commit patterns
 for f in $UNTRACKED; do
   case "$f" in
     .env|*.env|*.secret|build/|dist/|target/|node_modules/|__pycache__/)
@@ -75,8 +98,7 @@ fi
 os_info "Staged files:"
 echo "$STAGED" | sed 's/^/  /'
 
-# ── Determine commit scope from changed files ────────────────
-# Heuristic: pick the most common top-level domain folder changed
+# ── Determine scope ──────────────────────────────────────────
 SCOPE=$(echo "$STAGED" \
   | grep -oE 'src/[^/]+/[^/]+/[^/]+' \
   | awk -F'/' '{print $4}' \
@@ -85,25 +107,21 @@ SCOPE=$(echo "$STAGED" \
   | tr '[:upper:]' '[:lower:]' \
   | sed 's/controller//;s/service//;s/handler//')
 
-if [ -z "$SCOPE" ]; then
-  SCOPE="app"
-fi
+[ -z "$SCOPE" ] && SCOPE="app"
 
 # ── Build commit message ─────────────────────────────────────
 os_step "Building commit message..."
 
-# Determine conventional commit type from branch name
 case "$CURRENT_BRANCH" in
-  feature/*) COMMIT_TYPE="feat" ;;
-  fix/*)     COMMIT_TYPE="fix" ;;
-  test/*)    COMMIT_TYPE="test" ;;
-  docs/*)    COMMIT_TYPE="docs" ;;
-  chore/*)   COMMIT_TYPE="chore" ;;
+  feature/*)  COMMIT_TYPE="feat" ;;
+  fix/*)      COMMIT_TYPE="fix" ;;
+  test/*)     COMMIT_TYPE="test" ;;
+  docs/*)     COMMIT_TYPE="docs" ;;
+  chore/*)    COMMIT_TYPE="chore" ;;
   refactor/*) COMMIT_TYPE="refactor" ;;
-  *)         COMMIT_TYPE="feat" ;;
+  *)          COMMIT_TYPE="feat" ;;
 esac
 
-# Count changed files for the body
 FILE_COUNT=$(echo "$STAGED" | wc -l | tr -d ' ')
 
 if [ -n "$TICKET_ID" ]; then
@@ -125,7 +143,7 @@ echo ""
 echo "$BODY" | sed 's/^/  /'
 os_divider
 
-# ── Confirm before committing ────────────────────────────────
+# ── Confirm ──────────────────────────────────────────────────
 printf "%b" "${COLOR_WARN}Proceed with this commit? [y/N]: ${RESET}"
 read -r confirm
 case "$confirm" in
@@ -145,17 +163,13 @@ os_step "Pushing branch $CURRENT_BRANCH..."
 git push -u origin "$CURRENT_BRANCH"
 os_success "Branch pushed."
 
-# ── Open PR with GitHub CLI ──────────────────────────────────
+# ── Open PR targeting develop ────────────────────────────────
 if ! command -v gh > /dev/null 2>&1; then
   os_warn "GitHub CLI (gh) not found — skipping PR creation."
-  os_info "Install it from: https://cli.github.com"
   exit 0
 fi
 
-os_step "Creating Pull Request..."
-
-PR_TITLE=""
-PR_BODY=""
+os_step "Creating Pull Request → develop..."
 
 if [ -n "$TICKET_ID" ]; then
   PR_TITLE="[$TICKET_ID] $SUBJECT"
@@ -183,9 +197,10 @@ fi
 PR_URL=$(gh pr create \
   --title "$PR_TITLE" \
   --body "$PR_BODY" \
-  --head "$CURRENT_BRANCH" 2>&1)
+  --head "$CURRENT_BRANCH" \
+  --base "develop" 2>&1)
 
 os_divider
-os_success "Pull Request created!"
+os_success "Pull Request created → develop"
 os_info    "$PR_URL"
 os_divider
