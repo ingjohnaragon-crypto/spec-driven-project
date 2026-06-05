@@ -14,7 +14,6 @@ from contracts_api import (
     PrePostingHookArguments,
     ActivationHookArguments,
     RejectionReason,
-    ScheduledEventHookArguments,
 )
 
 import sys, os

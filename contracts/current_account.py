@@ -1,6 +1,7 @@
 from contracts_api import (
     ActivationHookArguments,
     ActivationHookResult,
+    BalanceCoordinate,
     BalanceDefaultDict,
     DenominationShape,
     NumberShape,
@@ -17,7 +18,7 @@ from contracts_api import (
     ScheduledEventHookResult,
     Tside,
 )
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal
 
 api = "4.0.0"
 version = "1.0.0"
@@ -63,8 +64,6 @@ def _get_committed_balance(
     balances: BalanceDefaultDict,
     denomination: str,
 ) -> Decimal:
-    from contracts_api import BalanceCoordinate
-
     key = BalanceCoordinate(
         account_address=DEFAULT_ADDRESS,
         asset=DEFAULT_ASSET,
@@ -117,14 +116,17 @@ def pre_posting_hook(
     current_balance = _get_committed_balance(balances, denomination)
     posting_effect = _posting_net_effect(hook_arguments.posting_instructions)
     available_balance = _calculate_available_balance(current_balance, overdraft_limit)
+    resulting_balance = current_balance + posting_effect
+    overdraft_used = _calculate_overdraft_usage(resulting_balance)
+    overdraft_remaining = _calculate_overdraft_remaining(overdraft_limit, overdraft_used)
 
-    if current_balance + posting_effect < -overdraft_limit:
+    if overdraft_used > overdraft_limit:
         return PrePostingHookResult(
             rejection=Rejection(
                 message=(
-                    f"Insufficient funds: current balance {current_balance} "
-                    f"{denomination}, overdraft limit {overdraft_limit}, "
-                    f"requested net effect {posting_effect}."
+                    f"Insufficient funds: available balance {available_balance} "
+                    f"{denomination}, requested net effect {posting_effect}, "
+                    f"overdraft remaining {overdraft_remaining}."
                 ),
                 reason_code=RejectionReason.INSUFFICIENT_FUNDS,
             )
