@@ -1,0 +1,236 @@
+# Enriched Ticket: KAN-10 — Depósito a Plazo Fijo (Fixed-Term Deposit)
+
+## Original Description
+
+### User Story
+As a **bank product manager**, I want a Vault Smart Contract that models a Fixed-Term Deposit account, so that customers can lock funds for a defined period and earn a guaranteed interest rate upon maturity.
+
+### Acceptance Criteria (original)
+- Contract accepts an initial deposit and locks it until a configurable maturity date
+- Interest accrues daily based on a configurable annual rate (AER), using `Decimal` with `ROUND_HALF_UP`
+- Withdrawals before maturity are rejected with `RejectionReason.AGAINST_TERMS_AND_CONDITIONS`
+- On maturity date, principal + accrued interest is disbursed via a scheduled event
+- Early closure (penalty) is supported as an optional flag (`allow_early_closure: bool`)
+- Early closure applies a configurable penalty rate that reduces accrued interest before payout
+- Denomination is configurable (default `GBP`); only single-denomination postings accepted
+- `MATURITY_DATE` parameter validated strictly in the future at account opening
+- `pre_posting_hook` rejects any deposit after the initial funding posting
+- `scheduled_event_hook` fires on maturity to disburse funds
+- `os-vault-test` passes; `os-vault-test --coverage` >= 90%
+
+---
+
+## Enhanced Description
+
+A **Fixed-Term Deposit** is a liability product where the customer locks a principal amount
+for a fixed period in exchange for a guaranteed annual interest rate. The contract enforces
+the lock-in period at the posting layer and disburses principal + accrued interest
+automatically on the maturity date via a scheduled event.
+
+### Business Rules
+
+| Rule | Detail |
+|---|---|
+| Single deposit | Only one deposit allowed — at activation. All subsequent credits rejected. |
+| Lock-in | No withdrawals permitted before maturity. Rejection: `AGAINST_TERMS_AND_CONDITIONS`. |
+| Daily accrual | Interest accrues daily: `principal × (annual_rate / 365)`. Uses `Decimal` + `ROUND_HALF_UP`. |
+| Maturity disbursement | On `MATURITY_EVENT`, principal + accrued interest posted to `DEFAULT` address. |
+| Early closure | Controlled by `allow_early_closure` flag. If `True`, penalty reduces accrued interest before payout. Penalty floor: 0 (never negative payout). |
+| Denomination | Single configurable denomination. Cross-denomination postings rejected. |
+
+---
+
+## Parameters
+
+| Name | Shape | Level | Default | Description |
+|---|---|---|---|---|
+| `denomination` | `DenominationShape()` | `INSTANCE` | `"GBP"` | Account denomination |
+| `annual_interest_rate` | `NumberShape(min=0, max=1, step=0.0001)` | `TEMPLATE` | `Decimal("0.05")` | AER (0.05 = 5%) |
+| `maturity_date` | `DateShape()` | `INSTANCE` | — | Must be strictly in the future at activation |
+| `allow_early_closure` | `OptionalShape(UnionShape([UnionItem("true","True"), UnionItem("false","False")]))` | `TEMPLATE` | `"false"` | Enables early closure with penalty |
+| `early_closure_penalty_rate` | `NumberShape(min=0, max=1, step=0.0001)` | `TEMPLATE` | `Decimal("0.20")` | Fraction of accrued interest forfeited on early closure |
+
+---
+
+## Balance Addresses
+
+| Address | Purpose |
+|---|---|
+| `DEFAULT` | Principal balance |
+| `ACCRUED_INTEREST` | Running daily interest accrual (internal) |
+
+Interest is accrued from `DEFAULT` into `ACCRUED_INTEREST` daily.
+On maturity, `ACCRUED_INTEREST` is swept back to `DEFAULT` as a single `CustomInstruction`.
+
+---
+
+## Scheduled Events
+
+| Event name | Schedule | Hook action |
+|---|---|---|
+| `DAILY_ACCRUAL` | Daily at 23:59:59 UTC | Calculate `principal × daily_rate`, post to `ACCRUED_INTEREST` |
+| `MATURITY_EVENT` | At `maturity_date` 00:00:00 UTC | Sweep `ACCRUED_INTEREST` → `DEFAULT`; flag account closed |
+
+`DAILY_ACCRUAL` is registered in `activation_hook` using `ScheduleExpression` with a recurring
+daily pattern. `MATURITY_EVENT` is a one-shot event also registered at activation using
+the exact `maturity_date` value.
+
+---
+
+## Hooks
+
+### `activation_hook`
+```
+1. Read `maturity_date` parameter
+2. If maturity_date <= effective_datetime.date() → reject with InvalidContractParameter
+3. Register DAILY_ACCRUAL (recurring, daily at 23:59:59 UTC)
+4. Register MATURITY_EVENT (one-shot, at maturity_date 00:00:00 UTC)
+5. Return ActivationHookResult(scheduled_events_return_value={...})
+```
+
+### `pre_posting_hook`
+```
+1. Read denomination parameter
+2. For each posting instruction:
+   a. If denomination mismatch → reject WRONG_DENOMINATION
+   b. Compute net effect on DEFAULT (Phase.COMMITTED on BalanceCoordinate)
+   c. If net effect < 0 (withdrawal) → reject AGAINST_TERMS_AND_CONDITIONS
+      "Withdrawals are not permitted before maturity."
+   d. If net effect > 0 and DEFAULT balance already > 0 → reject AGAINST_TERMS_AND_CONDITIONS
+      "Only one deposit is accepted at account opening."
+3. Return PrePostingHookResult()  ← no rejection = accepted
+```
+
+### `scheduled_event_hook` — DAILY_ACCRUAL
+```
+1. Read annual_interest_rate, denomination
+2. Read principal = committed balance at DEFAULT address
+3. If principal == 0: return (nothing to accrue)
+4. daily_rate = (annual_interest_rate / 365).quantize(Decimal("0.0000000001"), ROUND_HALF_UP)
+5. interest = (principal * daily_rate).quantize(Decimal("0.01"), ROUND_HALF_UP)
+6. Build CustomInstruction:
+     Debit  DEFAULT          +interest  (increases liability cost)
+     Credit ACCRUED_INTEREST +interest
+7. Return ScheduledEventHookResult(posting_instructions_directives=[...])
+```
+
+### `scheduled_event_hook` — MATURITY_EVENT
+```
+1. Read denomination
+2. accrued = committed balance at ACCRUED_INTEREST address
+3. If accrued > 0:
+     Build CustomInstruction: Debit ACCRUED_INTEREST, Credit DEFAULT
+4. Return ScheduledEventHookResult(...)
+   (Principal + interest now sit in DEFAULT, ready for customer withdrawal)
+```
+
+### `derived_parameter_hook`
+```
+Returns:
+  accrued_interest   → committed balance at ACCRUED_INTEREST address (Decimal)
+  days_to_maturity   → (maturity_date - effective_datetime.date()).days  (int, floor 0)
+```
+
+---
+
+## Files to Create or Modify
+
+| File | Layer | Action |
+|---|---|---|
+| `contracts/fixed_term_deposit.py` | Smart Contract | Create |
+| `tests/test_fixed_term_deposit.py` | Tests | Create |
+
+---
+
+## Acceptance Criteria (enhanced)
+
+- [ ] `activation_hook` registers both `DAILY_ACCRUAL` and `MATURITY_EVENT` scheduled events
+- [ ] `activation_hook` rejects activation if `maturity_date` <= `effective_datetime.date()`
+- [ ] `pre_posting_hook` accepts exactly one credit posting when DEFAULT balance is zero
+- [ ] `pre_posting_hook` rejects a second deposit (`AGAINST_TERMS_AND_CONDITIONS`)
+- [ ] `pre_posting_hook` rejects any debit/withdrawal before maturity (`AGAINST_TERMS_AND_CONDITIONS`)
+- [ ] `pre_posting_hook` rejects postings in a denomination other than the configured one (`WRONG_DENOMINATION`)
+- [ ] `DAILY_ACCRUAL` event correctly computes `principal × (annual_rate / 365)` using `Decimal` + `ROUND_HALF_UP`
+- [ ] `DAILY_ACCRUAL` posts to `ACCRUED_INTEREST` address with a `CustomInstruction` (no `client_transaction_id`)
+- [ ] `DAILY_ACCRUAL` is a no-op if the DEFAULT balance is zero
+- [ ] `MATURITY_EVENT` sweeps `ACCRUED_INTEREST` → `DEFAULT` in a single instruction
+- [ ] `derived_parameter_hook` returns `accrued_interest` and `days_to_maturity` correctly
+- [ ] Early closure path: if `allow_early_closure = true`, penalty reduces accrued interest; floor is `Decimal("0")`
+- [ ] All balance reads use `BalanceCoordinate` with `Phase.COMMITTED` on the key (not the value)
+- [ ] All datetimes use `ZoneInfo("UTC")` — never `timezone.utc`
+- [ ] No stdlib imports in contract file
+- [ ] No mutable global state
+- [ ] `os-vault-test` — all tests green
+- [ ] `os-vault-test --coverage` — >= 90%
+
+---
+
+## Unit Test Cases
+
+Minimum 22 tests across these categories:
+
+### Activation
+1. `test_activation_valid_future_maturity` — activation succeeds, both events scheduled
+2. `test_activation_rejects_maturity_today` — maturity_date == today → rejected
+3. `test_activation_rejects_maturity_past` — maturity_date in the past → rejected
+
+### Pre-Posting — Deposits
+4. `test_initial_deposit_accepted` — first credit on empty account passes
+5. `test_second_deposit_rejected` — second credit after funded account → `AGAINST_TERMS_AND_CONDITIONS`
+6. `test_wrong_denomination_rejected` — posting in USD when account is GBP → `WRONG_DENOMINATION`
+
+### Pre-Posting — Withdrawals
+7. `test_withdrawal_before_maturity_rejected` — debit → `AGAINST_TERMS_AND_CONDITIONS`
+8. `test_zero_amount_posting_accepted` — edge case: zero-value posting passes
+
+### Daily Accrual
+9. `test_daily_accrual_standard_rate` — 5% AER on £1000 = £0.14/day (rounded)
+10. `test_daily_accrual_zero_rate` — 0% rate produces zero accrual instruction
+11. `test_daily_accrual_zero_balance` — no posting generated when principal is zero
+12. `test_daily_accrual_leap_year` — 5% AER on Feb 29 still divides by 365 (not 366)
+13. `test_daily_accrual_uses_decimal_precision` — result is quantized to 2 d.p. `ROUND_HALF_UP`
+
+### Maturity Disbursement
+14. `test_maturity_event_sweeps_accrued_interest` — ACCRUED_INTEREST balance moved to DEFAULT
+15. `test_maturity_event_zero_interest` — no CustomInstruction when accrued = 0
+16. `test_maturity_payout_correct_total` — principal + accrued in DEFAULT after event
+
+### Early Closure
+17. `test_early_closure_disabled_rejects_withdrawal` — allow_early_closure=false, debit rejected
+18. `test_early_closure_enabled_applies_penalty` — penalty_rate=0.20 reduces 20% of interest
+19. `test_early_closure_penalty_floor_zero` — penalty cannot make payout negative
+
+### Derived Parameters
+20. `test_derived_accrued_interest_matches_balance` — matches ACCRUED_INTEREST balance
+21. `test_derived_days_to_maturity_correct` — returns correct days from today
+22. `test_derived_days_to_maturity_at_maturity` — returns 0 on maturity date
+
+---
+
+## Non-Functional Requirements
+
+| Concern | Requirement |
+|---|---|
+| Precision | All monetary calculations use `Decimal` + `ROUND_HALF_UP`. Never `float`. |
+| Sandbox compliance | No `import os/sys/json/datetime/math`. Only `contracts_api` and `decimal`. |
+| Immutability | No mutable module-level state. All state via Vault balance/parameter APIs. |
+| Idempotency | `DAILY_ACCRUAL` is safe to re-run: checks balance before posting. |
+| Denomination safety | All postings validated against configured denomination before processing. |
+| API version | `api = "4.0.0"` — all patterns must be API 4.0 compliant. |
+| Test coverage | `os-vault-test --coverage` must report >= 90% before opening a PR. |
+
+---
+
+## Definition of Done
+
+- [ ] `contracts/fixed_term_deposit.py` created, passes Vault sandbox linting
+- [ ] `tests/test_fixed_term_deposit.py` with >= 22 tests, all green
+- [ ] `os-vault-test --coverage` >= 90%
+- [ ] PR opened from `feature/KAN-10-backend` → `develop` via `os-commit KAN-10`
+- [ ] Code review passed via `os-review` + `os-review-apply`
+- [ ] Ticket transitioned to **Done** via `os-transition KAN-10 "Done"`
+
+---
+
+> Enriched content saved to `ai-specs/changes/KAN-10_enriched.md`.
+> Run `os-enrich-apply KAN-10` to upload it to Jira.

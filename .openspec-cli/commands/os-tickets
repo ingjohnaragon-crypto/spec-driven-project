@@ -20,5 +20,19 @@ os_label "  OpenSpec — Jira Tickets  [$PROJECT_KEY]"
 os_divider
 [ -n "$STATUS_FILTER" ] && os_info "Filter: $STATUS_FILTER"
 
-os_jira_list_tickets "$PROJECT_KEY" "$STATUS_FILTER"
+TICKET_LIST=$(os_jira_list_tickets "$PROJECT_KEY" "$STATUS_FILTER")
+echo "$TICKET_LIST"
+os_divider
+
+# ── Save snapshot ─────────────────────────────────────────────
+CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+mkdir -p "$CHANGES_DIR"
+SNAPSHOT_FILE="$CHANGES_DIR/tickets-$(date +%Y%m%d).md"
+
+printf '# Jira Tickets — %s\n' "$(date +%Y-%m-%d)" > "$SNAPSHOT_FILE"
+printf 'Project : %s\n' "$PROJECT_KEY"               >> "$SNAPSHOT_FILE"
+[ -n "$STATUS_FILTER" ] && printf 'Filter  : %s\n' "$STATUS_FILTER" >> "$SNAPSHOT_FILE"
+printf '\n```\n%s\n```\n' "$TICKET_LIST"              >> "$SNAPSHOT_FILE"
+
+os_info "Snapshot: ai-specs/changes/tickets-$(date +%Y%m%d).md"
 os_divider

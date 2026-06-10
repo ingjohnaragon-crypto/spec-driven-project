@@ -29,14 +29,24 @@ os_load_config
 # ── Resolve review file ──────────────────────────────────────
 REVIEW_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
 
+# Derive ticket ID from PR branch name for archive lookup
+PR_BRANCH_NAME=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName 2>/dev/null || echo "")
+PR_TICKET_ID=$(echo "$PR_BRANCH_NAME" | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
+ARCHIVE_FILE=""
+[ -n "$PR_TICKET_ID" ] && ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/${PR_TICKET_ID}_review.md"
+[ -z "$ARCHIVE_FILE" ] && ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/pr-${PR_NUMBER}_review.md"
+
 if [ -n "$CONTENT_FILE" ] && [ -f "$CONTENT_FILE" ]; then
   SOURCE_FILE="$CONTENT_FILE"
+elif [ -n "$ARCHIVE_FILE" ] && [ -f "$ARCHIVE_FILE" ]; then
+  SOURCE_FILE="$ARCHIVE_FILE"
 elif [ -f "$REVIEW_FILE" ]; then
   SOURCE_FILE="$REVIEW_FILE"
 else
   os_error "No review file found."
-  os_info  "Save Copilot review output to: .openspec-cli/.review-output.md"
-  os_info  "Then run: os-review-apply $PR_NUMBER"
+  os_info  "Expected at: ai-specs/changes/${PR_TICKET_ID}_review.md"
+  os_info  "Fallback  : .openspec-cli/.review-output.md"
+  os_info  "Or run   : os-review $PR_NUMBER"
   exit 1
 fi
 

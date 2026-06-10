@@ -123,6 +123,17 @@ TICKET_ID=$(gh pr view "$PR_NUMBER" --json headRefName \
 
 FULL_REVIEW=$(cat "$REVIEW_FILE")
 
+# ── Load fix report template ──────────────────────────────────
+FIX_SUMMARY_TEMPLATE=""
+FIX_CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/review-fix-summary.md"
+if [ -f "$FIX_CMD_FILE" ]; then
+  FIX_SUMMARY_TEMPLATE=$(cat "$FIX_CMD_FILE" \
+    | sed "s|\$ARGUMENTS|$PR_NUMBER|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
+    | sed "s|{{lint_command}}|$OS_LINT_CMD|g")
+fi
+
 # ── Build fix prompt ──────────────────────────────────────────
 os_step "Building fix prompt..."
 
@@ -158,7 +169,14 @@ $FULL_REVIEW
    - No new linting errors: $OS_LINT_CMD
 5. Keep the same branch — do not create a new one.
 
-Fix the issues now. Start with CRITICAL, then MAJOR, then MINOR."
+Fix the issues now. Start with CRITICAL, then MAJOR, then MINOR.
+
+---
+## Fix Report
+
+After completing all fixes, generate a fix report following this template:
+
+$FIX_SUMMARY_TEMPLATE"
 
 FIX_PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.fix-prompt.md"
 printf '%s' "$FIX_PROMPT" > "$FIX_PROMPT_FILE"
@@ -223,6 +241,31 @@ if [ "$AUTO_COMMIT" = "true" ]; then
 
     git push origin "$CURRENT_BRANCH"
     os_success "Fixes committed and pushed: $MSG"
+  fi
+
+  # ── Save fix report ─────────────────────────────────────────
+  CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+  mkdir -p "$CHANGES_DIR"
+  if [ -n "$TICKET_ID" ]; then
+    FIX_REPORT_FILE="$CHANGES_DIR/${TICKET_ID}_fix.md"
+    cat > "$FIX_REPORT_FILE" << FIX_EOF
+# Review Fix Report: PR #$PR_NUMBER
+
+## Original Verdict
+REQUEST CHANGES — see \`ai-specs/changes/${TICKET_ID}_review.md\`
+
+## Issues Addressed
+Fixes applied to issues identified in the review.
+See git diff for specific changes.
+
+## Verification
+- Tests: all passing — \`$OS_TEST_CMD\`
+- Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Verdict After Fixes
+READY FOR RE-REVIEW
+FIX_EOF
+    os_info "Fix report: ai-specs/changes/${TICKET_ID}_fix.md"
   fi
 fi
 

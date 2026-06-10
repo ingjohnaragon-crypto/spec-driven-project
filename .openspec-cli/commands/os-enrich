@@ -93,6 +93,10 @@ PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
+CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+ARCHIVE_FILE="$CHANGES_DIR/${TICKET_ID}_enriched.md"
+mkdir -p "$CHANGES_DIR"
+
 os_divider
 
 # ── Deliver and capture output ────────────────────────────────
@@ -100,8 +104,10 @@ if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
   # CLI agent — ejecuta y captura automáticamente
   os_step "Sending prompt to $OS_AGENT_LABEL..."
   ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
-  os_success "Enriched content saved automatically!"
-  os_info "File: .openspec-cli/.enriched-content.md"
+  cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
+  os_success "Enriched content saved!"
+  os_info "Working : .openspec-cli/.enriched-content.md"
+  os_info "Archive : ai-specs/changes/${TICKET_ID}_enriched.md"
   os_divider
   os_info "Preview (first 10 lines):"
   head -10 "$OUTPUT_FILE"
@@ -123,7 +129,10 @@ else
 "
   done
   printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
-  os_success "Saved to: .openspec-cli/.enriched-content.md"
+  cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
+  os_success "Saved!"
+  os_info "Working : .openspec-cli/.enriched-content.md"
+  os_info "Archive : ai-specs/changes/${TICKET_ID}_enriched.md"
   os_divider
   os_info "Preview (first 10 lines):"
   head -10 "$OUTPUT_FILE"
