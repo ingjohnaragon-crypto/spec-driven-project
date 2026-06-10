@@ -10,7 +10,7 @@ stack: vault-smart-contracts
 # Change this to switch how prompts are delivered.
 # Must match one of the keys under "agents:" below.
 # ─────────────────────────────────────────────
-agent: copilot
+agent: claude-code
 
 # ─────────────────────────────────────────────
 # STACK REGISTRY

@@ -10,3 +10,47 @@ Follow these steps:
 @documentation. Return it in markdown format.
 6. Update ticket in Jira, adding the new content after the old one and marking each section with the h2 tags [original] and [enhanced]. Apply proper formatting to make it readable and visually clear, using appropriate text types (lists, code snippets...).
 7. If the ticket status was "To refine", move the task to the "Pending refinement validation" column (or the equivalent transition in **this** Jira project — status names vary by workflow; use the MCP to discover valid transitions).
+
+## Output
+
+Save the enriched content as a markdown file at `ai-specs/changes/$ARGUMENTS_enriched.md`
+using this structure:
+
+---
+
+### `# Enriched Ticket: <TICKET-ID> — <Summary>`
+
+### `## Original Description`
+(copy of the original ticket description)
+
+### `## Enhanced Description`
+Full description of the functionality as refined.
+
+### `## Acceptance Criteria`
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+### `## Fields & Endpoints`
+Table or list of fields to create/update, endpoint URLs, HTTP methods,
+request/response shapes.
+
+### `## Files to Create or Modify`
+| File | Layer | Action |
+|---|---|---|
+| `path/to/file.ext` | Domain / Application / Presentation / Infrastructure | Create / Modify |
+
+### `## Unit Test Cases`
+- Happy path
+- Validation error
+- Not found / Conflict
+- Edge cases
+
+### `## Non-Functional Requirements`
+Security, performance, validation constraints.
+
+---
+
+## Final message format
+
+> Enriched content saved to `ai-specs/changes/<ticket-id>_enriched.md`.
+> Run `os-enrich-apply <TICKET-ID>` to upload it to Jira.
