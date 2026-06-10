@@ -38,7 +38,6 @@ from contracts_api import (
     UnionItemValue,
     UnionShape,
 )
-from contracts_api.utils.exceptions import InvalidContractParameter
 from decimal import Decimal, ROUND_HALF_UP
 
 api          = "4.0.0"
@@ -114,6 +113,8 @@ parameters = [
         description="Fraction of accrued interest forfeited on early closure (0.20 = 20%).",
         default_value=Decimal("0.20"),
     ),
+    # Derived parameters: declared with derived=True (API 4.0 SDK pattern).
+    # Values are computed and returned by derived_parameter_hook.
     Parameter(
         name="accrued_interest",
         shape=NumberShape(),
@@ -189,13 +190,14 @@ def _get_early_closure_flag(vault) -> bool:
 def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
-    maturity_date  = vault.get_parameter_timeseries(name="maturity_date").latest().value
+    opt_maturity   = vault.get_parameter_timeseries(name="maturity_date").latest()
+    if not opt_maturity.is_set():
+        raise ValueError("maturity_date is required for a Fixed-Term Deposit.")
+    maturity_date  = opt_maturity.value
     effective_date = hook_arguments.effective_datetime.date()
 
     if maturity_date.date() <= effective_date:
-        raise InvalidContractParameter(
-            "maturity_date must be strictly in the future."
-        )
+        raise ValueError("maturity_date must be strictly in the future.")
 
     start_dt = hook_arguments.effective_datetime
 
@@ -235,18 +237,20 @@ def pre_posting_hook(
     balances     = vault.get_balances_observation(fetcher_id="live_balances").balances
     principal    = _get_committed_balance(balances, DEFAULT_ADDRESS, denomination)
 
+    # Check denomination using the first balance coordinate of each posting
+    # instruction (all coords in one posting share the same denomination).
     for posting in hook_arguments.posting_instructions:
-        for coord, _ in posting.balances().items():
-            if coord.denomination != denomination:
-                return PrePostingHookResult(
-                    rejection=Rejection(
-                        message=(
-                            f"Posting denomination {coord.denomination} does not match "
-                            f"account denomination {denomination}."
-                        ),
-                        reason_code=RejectionReason.WRONG_DENOMINATION,
-                    )
+        coords = list(posting.balances().keys())
+        if coords and coords[0].denomination != denomination:
+            return PrePostingHookResult(
+                rejection=Rejection(
+                    message=(
+                        f"Posting denomination {coords[0].denomination} does not match "
+                        f"account denomination {denomination}."
+                    ),
+                    reason_code=RejectionReason.WRONG_DENOMINATION,
                 )
+            )
 
     posting_net = _posting_net_effect(hook_arguments.posting_instructions, denomination)
 
@@ -342,12 +346,16 @@ def scheduled_event_hook(
 def derived_parameter_hook(
     vault, hook_arguments: DerivedParameterHookArguments
 ) -> DerivedParameterHookResult:
-    denomination  = vault.get_parameter_timeseries(name="denomination").latest()
-    maturity_date = vault.get_parameter_timeseries(name="maturity_date").latest().value
-    balances      = vault.get_balances_observation(fetcher_id="live_balances").balances
-    accrued       = _get_committed_balance(balances, ACCRUED_INTEREST, denomination)
-    today         = hook_arguments.effective_datetime.date()
-    days          = max((maturity_date.date() - today).days, 0)
+    denomination = vault.get_parameter_timeseries(name="denomination").latest()
+    opt_maturity = vault.get_parameter_timeseries(name="maturity_date").latest()
+    balances     = vault.get_balances_observation(fetcher_id="live_balances").balances
+    accrued      = _get_committed_balance(balances, ACCRUED_INTEREST, denomination)
+    today        = hook_arguments.effective_datetime.date()
+
+    if opt_maturity.is_set():
+        days = max((opt_maturity.value.date() - today).days, 0)
+    else:
+        days = 0
 
     return DerivedParameterHookResult(
         parameters_return_value={
