@@ -21,7 +21,6 @@ from contracts_api import (
     ScheduledEventHookArguments,
     UnionItemValue,
 )
-from contracts_api.utils.exceptions import InvalidContractParameter
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -73,7 +72,8 @@ def make_vault(
     vault = MagicMock()
     vault.account_id = "test_ftd_account"
 
-    maturity_val      = OptionalValue(maturity_date)
+    # maturity_date=None simulates an unset OptionalShape parameter
+    maturity_val      = OptionalValue(maturity_date) if maturity_date is not None else OptionalValue(None)
     early_closure_val = OptionalValue(UnionItemValue(allow_early_closure))
 
     param_map = {
@@ -165,14 +165,22 @@ class TestActivationHook:
         vault = make_vault(maturity_date=TODAY_MATURITY)
         args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
 
-        with pytest.raises(InvalidContractParameter):
+        with pytest.raises(ValueError):
             contract.activation_hook(vault, args)
 
     def test_activation_rejects_maturity_past(self):
         vault = make_vault(maturity_date=PAST_MATURITY)
         args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
 
-        with pytest.raises(InvalidContractParameter):
+        with pytest.raises(ValueError):
+            contract.activation_hook(vault, args)
+
+    def test_activation_rejects_unset_maturity_date(self):
+        """Activation must fail when maturity_date is not provided."""
+        vault = make_vault(maturity_date=None)
+        args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
+
+        with pytest.raises(ValueError):
             contract.activation_hook(vault, args)
 
 
@@ -426,5 +434,13 @@ class TestDerivedParameters:
         maturity = datetime(2024, 6, 15, tzinfo=UTC)
         vault    = make_vault(maturity_date=maturity)
         result   = contract.derived_parameter_hook(vault, self._args(maturity))
+
+        assert result.parameters_return_value["days_to_maturity"] == 0
+
+    def test_derived_days_to_maturity_unset(self):
+        """Returns 0 when maturity_date is not set."""
+        vault  = make_vault(maturity_date=None)
+        args   = self._args(ACTIVATION_DATE)
+        result = contract.derived_parameter_hook(vault, args)
 
         assert result.parameters_return_value["days_to_maturity"] == 0
