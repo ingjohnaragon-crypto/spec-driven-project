@@ -40,9 +40,6 @@ from contracts_api import (
 )
 from contracts_api.utils.exceptions import InvalidContractParameter
 from decimal import Decimal, ROUND_HALF_UP
-# datetime imported only for DateShape parameter default_value declaration
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 api          = "4.0.0"
 version      = "1.0.0"
@@ -85,11 +82,10 @@ parameters = [
     ),
     Parameter(
         name="maturity_date",
-        shape=DateShape(),
+        shape=OptionalShape(shape=DateShape()),
         level=ParameterLevel.INSTANCE,
         display_name="Maturity Date",
         description="The date on which the deposit matures. Must be in the future at activation.",
-        default_value=datetime(2099, 12, 31, tzinfo=ZoneInfo("UTC")),
     ),
     Parameter(
         name="allow_early_closure",
@@ -193,7 +189,7 @@ def _get_early_closure_flag(vault) -> bool:
 def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
-    maturity_date  = vault.get_parameter_timeseries(name="maturity_date").latest()
+    maturity_date  = vault.get_parameter_timeseries(name="maturity_date").latest().value
     effective_date = hook_arguments.effective_datetime.date()
 
     if maturity_date.date() <= effective_date:
@@ -347,7 +343,7 @@ def derived_parameter_hook(
     vault, hook_arguments: DerivedParameterHookArguments
 ) -> DerivedParameterHookResult:
     denomination  = vault.get_parameter_timeseries(name="denomination").latest()
-    maturity_date = vault.get_parameter_timeseries(name="maturity_date").latest()
+    maturity_date = vault.get_parameter_timeseries(name="maturity_date").latest().value
     balances      = vault.get_balances_observation(fetcher_id="live_balances").balances
     accrued       = _get_committed_balance(balances, ACCRUED_INTEREST, denomination)
     today         = hook_arguments.effective_datetime.date()

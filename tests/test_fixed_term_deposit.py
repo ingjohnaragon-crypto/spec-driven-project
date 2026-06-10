@@ -73,12 +73,13 @@ def make_vault(
     vault = MagicMock()
     vault.account_id = "test_ftd_account"
 
+    maturity_val      = OptionalValue(maturity_date)
     early_closure_val = OptionalValue(UnionItemValue(allow_early_closure))
 
     param_map = {
         "denomination":             denomination,
         "annual_interest_rate":     annual_interest_rate,
-        "maturity_date":            maturity_date,
+        "maturity_date":            maturity_val,
         "allow_early_closure":      early_closure_val,
         "early_closure_penalty_rate": early_closure_penalty_rate,
     }
