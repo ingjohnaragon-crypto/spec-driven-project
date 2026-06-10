@@ -77,6 +77,16 @@ if [ -n "$TICKET_ID" ]; then
   [ -f "$PLAN_FILE" ] && PLAN_CONTENT=$(cat "$PLAN_FILE")
 fi
 
+# ── Load review task template ─────────────────────────────────
+REVIEW_TEMPLATE=""
+REVIEW_CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/review-pr.md"
+if [ -f "$REVIEW_CMD_FILE" ]; then
+  REVIEW_TEMPLATE=$(cat "$REVIEW_CMD_FILE" \
+    | sed "s|\$ARGUMENTS|$PR_NUMBER|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g")
+fi
+
 # ── Build prompt ─────────────────────────────────────────────
 os_step "Building review prompt..."
 
@@ -125,37 +135,20 @@ $DIFF_CONTENT
 \`\`\`
 
 ---
-## Review Task
-
-### Summary
-One paragraph + overall verdict: APPROVE / REQUEST_CHANGES / COMMENT
-
-### Architecture & Design
-- DDD layered architecture respected?
-- Separation of concerns correct?
-
-### Code Quality
-- Naming, error handling, code smells?
-
-### Testing
-- Sufficient tests? Coverage >= 90%? AAA pattern?
-
-### Security
-- Hardcoded secrets? Input validation? Sensitive data in logs?
-
-### Specific Issues
-For each issue:
-- **File**: path (line N) — **Severity**: CRITICAL/MAJOR/MINOR — **Fix**: suggestion
-
-### What's Done Well
-2-3 highlights.
-
-### Final Verdict
-**APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**"
+## Your Task
+$REVIEW_TEMPLATE"
 
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
+
+CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+mkdir -p "$CHANGES_DIR"
+if [ -n "$TICKET_ID" ]; then
+  REVIEW_ARCHIVE="$CHANGES_DIR/${TICKET_ID}_review.md"
+else
+  REVIEW_ARCHIVE="$CHANGES_DIR/pr-${PR_NUMBER}_review.md"
+fi
 
 os_divider
 
@@ -163,7 +156,10 @@ os_divider
 if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
   os_step "Sending review prompt to $OS_AGENT_LABEL..."
   ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
-  os_success "Review saved automatically!"
+  cp "$OUTPUT_FILE" "$REVIEW_ARCHIVE"
+  os_success "Review saved!"
+  os_info "Working : .openspec-cli/.review-output.md"
+  os_info "Archive : $REVIEW_ARCHIVE"
   os_divider
   os_info "Preview (first 15 lines):"
   head -15 "$OUTPUT_FILE"
@@ -183,7 +179,10 @@ else
 "
   done
   printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
-  os_success "Review saved to: .openspec-cli/.review-output.md"
+  cp "$OUTPUT_FILE" "$REVIEW_ARCHIVE"
+  os_success "Review saved!"
+  os_info "Working : .openspec-cli/.review-output.md"
+  os_info "Archive : $REVIEW_ARCHIVE"
   os_divider
   os_info "Preview (first 15 lines):"
   head -15 "$OUTPUT_FILE"

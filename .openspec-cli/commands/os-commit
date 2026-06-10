@@ -204,3 +204,39 @@ os_divider
 os_success "Pull Request created → develop"
 os_info    "$PR_URL"
 os_divider
+
+# ── Save commit record ────────────────────────────────────────
+if [ -n "$TICKET_ID" ]; then
+  CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+  mkdir -p "$CHANGES_DIR"
+  COMMIT_FILE="$CHANGES_DIR/${TICKET_ID}_commit.md"
+  PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$' || echo "?")
+
+  cat > "$COMMIT_FILE" << RECORD_EOF
+# Commit Record: $TICKET_ID
+
+## Branch
+$CURRENT_BRANCH
+
+## Commit
+- **Message**: $SUBJECT
+- **Files changed**: $FILE_COUNT file(s)
+- **Stack**: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Changed Files
+$(echo "$STAGED" | sed 's/^/- /')
+
+## Pull Request
+- **URL**: $PR_URL
+- **Base branch**: develop
+- **Status**: Open
+
+## Next Steps
+- [ ] \`os-review $PR_NUMBER\` — generate code review
+- [ ] \`os-review-apply $PR_NUMBER\` — publish to GitHub
+- [ ] \`os-transition $TICKET_ID "In Review"\` — update Jira
+RECORD_EOF
+
+  os_info "Commit record: ai-specs/changes/${TICKET_ID}_commit.md"
+  os_divider
+fi
