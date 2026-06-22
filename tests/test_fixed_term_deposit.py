@@ -102,6 +102,7 @@ def make_posting(
 ) -> MagicMock:
     """Create a mock posting instruction with a DEFAULT address balance entry."""
     pi = MagicMock()
+    pi.denomination = denomination
     key = BalanceCoordinate(
         account_address="DEFAULT",
         asset=DEFAULT_ASSET,
@@ -367,7 +368,7 @@ class TestEarlyClosure:
         assert cr_default.amount == Decimal("8.00")
 
     def test_early_closure_penalty_floor_zero(self):
-        """Penalty larger than accrued → net_payout = 0 (no instruction emitted)."""
+        """penalty_rate=1.0, accrued=£1 → net_payout=0, ACCRUED_INTEREST still cleared."""
         vault  = make_vault(
             default_balance=Decimal("0"),
             accrued_balance=Decimal("1"),
@@ -376,7 +377,10 @@ class TestEarlyClosure:
         )
         result = contract.post_posting_hook(vault, make_post_posting_args())
 
-        assert len(result.posting_instructions_directives) == 0
+        assert len(result.posting_instructions_directives) == 1
+        postings   = result.posting_instructions_directives[0].posting_instructions[0].postings
+        dr_accrued = next(p for p in postings if not p.credit and p.account_address == "ACCRUED_INTEREST")
+        assert dr_accrued.amount == Decimal("1.00")
 
     def test_post_posting_noop_when_early_closure_disabled(self):
         """post_posting_hook returns empty directives when early closure is off."""
@@ -403,6 +407,28 @@ class TestEarlyClosure:
         result = contract.scheduled_event_hook(vault, args)
 
         assert len(result.posting_instructions_directives) == 0
+
+    def test_early_closure_accrued_interest_zeroed(self):
+        """ACCRUED_INTEREST is fully zeroed after early closure regardless of penalty split."""
+        vault  = make_vault(
+            default_balance=Decimal("0"),
+            accrued_balance=Decimal("10"),
+            allow_early_closure="true",
+            early_closure_penalty_rate=Decimal("0.20"),
+        )
+        result = contract.post_posting_hook(vault, make_post_posting_args())
+
+        assert len(result.posting_instructions_directives) == 1
+        all_postings = [
+            p
+            for ci in result.posting_instructions_directives[0].posting_instructions
+            for p in ci.postings
+        ]
+        total_dr_accrued = sum(
+            p.amount for p in all_postings
+            if not p.credit and p.account_address == "ACCRUED_INTEREST"
+        )
+        assert total_dr_accrued == Decimal("10.00")
 
 
 # ── 7. Derived parameters ──────────────────────────────────────────────────────

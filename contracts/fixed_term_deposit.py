@@ -237,15 +237,12 @@ def pre_posting_hook(
     balances     = vault.get_balances_observation(fetcher_id="live_balances").balances
     principal    = _get_committed_balance(balances, DEFAULT_ADDRESS, denomination)
 
-    # Check denomination using the first balance coordinate of each posting
-    # instruction (all coords in one posting share the same denomination).
     for posting in hook_arguments.posting_instructions:
-        coords = list(posting.balances().keys())
-        if coords and coords[0].denomination != denomination:
+        if posting.denomination != denomination:
             return PrePostingHookResult(
                 rejection=Rejection(
                     message=(
-                        f"Posting denomination {coords[0].denomination} does not match "
+                        f"Posting denomination {posting.denomination} does not match "
                         f"account denomination {denomination}."
                     ),
                     reason_code=RejectionReason.WRONG_DENOMINATION,
@@ -292,40 +289,68 @@ def post_posting_hook(
     penalty      = (accrued * penalty_rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     net_payout   = max(accrued - penalty, Decimal("0"))
 
-    if net_payout <= Decimal("0"):
-        return PostPostingHookResult(posting_instructions_directives=[])
+    hook_id      = vault.get_hook_execution_id()
+    instructions = []
 
-    hook_id = vault.get_hook_execution_id()
-    payout_instruction = CustomInstruction(
-        postings=[
-            Posting(
-                credit=False,
-                amount=net_payout,
-                denomination=denomination,
-                account_id=vault.account_id,
-                account_address=ACCRUED_INTEREST,
-                asset=DEFAULT_ASSET,
-                phase=Phase.COMMITTED,
-            ),
-            Posting(
-                credit=True,
-                amount=net_payout,
-                denomination=denomination,
-                account_id=vault.account_id,
-                account_address=DEFAULT_ADDRESS,
-                asset=DEFAULT_ASSET,
-                phase=Phase.COMMITTED,
-            ),
-        ],
-        instruction_details={
-            "description": "Early closure interest payout (after penalty)",
-            "hook_execution_id": str(hook_id),
-        },
-    )
+    if net_payout > Decimal("0"):
+        instructions.append(CustomInstruction(
+            postings=[
+                Posting(
+                    credit=False,
+                    amount=net_payout,
+                    denomination=denomination,
+                    account_id=vault.account_id,
+                    account_address=ACCRUED_INTEREST,
+                    asset=DEFAULT_ASSET,
+                    phase=Phase.COMMITTED,
+                ),
+                Posting(
+                    credit=True,
+                    amount=net_payout,
+                    denomination=denomination,
+                    account_id=vault.account_id,
+                    account_address=DEFAULT_ADDRESS,
+                    asset=DEFAULT_ASSET,
+                    phase=Phase.COMMITTED,
+                ),
+            ],
+            instruction_details={
+                "description": "Early closure interest payout (after penalty)",
+                "hook_execution_id": str(hook_id),
+            },
+        ))
+
+    if penalty > Decimal("0"):
+        instructions.append(CustomInstruction(
+            postings=[
+                Posting(
+                    credit=False,
+                    amount=penalty,
+                    denomination=denomination,
+                    account_id=vault.account_id,
+                    account_address=ACCRUED_INTEREST,
+                    asset=DEFAULT_ASSET,
+                    phase=Phase.COMMITTED,
+                ),
+                Posting(
+                    credit=True,
+                    amount=penalty,
+                    denomination=denomination,
+                    account_id=vault.account_id,
+                    account_address=DEFAULT_ADDRESS,
+                    asset=DEFAULT_ASSET,
+                    phase=Phase.COMMITTED,
+                ),
+            ],
+            instruction_details={
+                "description": "Early closure penalty forfeiture",
+                "hook_execution_id": str(hook_id),
+            },
+        ))
 
     return PostPostingHookResult(
         posting_instructions_directives=[
-            PostingInstructionsDirective(posting_instructions=[payout_instruction])
+            PostingInstructionsDirective(posting_instructions=instructions)
         ]
     )
 
