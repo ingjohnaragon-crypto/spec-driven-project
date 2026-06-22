@@ -18,7 +18,8 @@
       "Bash(py -m pytest --cov=contracts *)",
       "Bash(py .openspec-cli/lib/vault_lint.py *)",
       "Bash(py -m pytest tests/ -v --cov=contracts *)",
-      "Write(*)"
+      "Write(contracts/*)",
+      "Write(tests/*)"
     ]
   }
 }
