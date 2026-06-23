@@ -144,12 +144,83 @@ os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```
 
+## SDK-verified behaviours (contracts_api installed version)
+
+These were confirmed by inspecting the installed package and running tests. They override
+any conflicting advice from external documentation or AI-generated reviews.
+
+### Derived parameters — `Parameter(derived=True)`, NOT `DerivedParameter`
+
+`DerivedParameter` does **not** exist in this SDK — importing it raises `ImportError`.
+Declare derived parameters inside the regular `parameters` list using `derived=True`.
+
+```python
+# CORRECT
+Parameter(name="accrued_interest", shape=NumberShape(),
+          level=ParameterLevel.INSTANCE, derived=True, display_name="Accrued Interest")
+
+# WRONG — DerivedParameter is not importable from contracts_api
+from contracts_api import DerivedParameter   # ImportError
+```
+
+### `OptionalShape(DateShape())` — `OptionalValue` requires `datetime`, not `date`
+
+`OptionalValue` accepts `Union[Decimal, str, datetime, UnionItemValue, int]` only.
+Passing a `date` object raises `StrongTypingError`. `opt.value` returns a `datetime`;
+call `.date()` on it when a `date` comparison is needed.
+
+```python
+# CORRECT — in tests always wrap datetime, not date
+maturity_val = OptionalValue(datetime(2025, 6, 30, tzinfo=ZoneInfo("UTC")))  # ✅
+maturity_val = OptionalValue(date(2025, 6, 30))                               # ❌ StrongTypingError
+
+# CORRECT — in contract code, call .date() on the datetime value
+maturity_date = opt_maturity.value            # datetime
+if maturity_date.date() <= effective_date:    # date <= date ✅
+    ...
+```
+
+### `ParameterLevel.INSTANCE` without `OptionalShape` requires `default_value`
+
+The SDK raises `InvalidSmartContractError` at module load time for any INSTANCE parameter
+whose shape is non-optional and has no `default_value`. Use `OptionalShape` when the
+parameter can legitimately be absent at activation.
+
+```python
+# CORRECT — optional wrapper allows absence
+Parameter(name="maturity_date", shape=OptionalShape(shape=DateShape()),
+          level=ParameterLevel.INSTANCE, ...)
+
+# WRONG — raises InvalidSmartContractError on import
+Parameter(name="maturity_date", shape=DateShape(),
+          level=ParameterLevel.INSTANCE, ...)  # no default_value → crash
+```
+
+### Penalty and income postings — never credit `DEFAULT`
+
+A forfeiture or fee must credit an internal income address, not the customer's `DEFAULT`
+address. Define a module-level constant and route the credit there.
+
+```python
+PENALTY_INCOME = "PENALTY_INCOME"   # module-level constant
+
+# CORRECT — forfeited amount leaves the customer's balance sheet
+Posting(credit=True, amount=penalty, account_address=PENALTY_INCOME, ...)
+
+# WRONG — customer receives the penalty back, making it financially void
+Posting(credit=True, amount=penalty, account_address=DEFAULT_ADDRESS, ...)
+```
+
+---
+
 ## Testing standards
 
-- All tests use `ZoneInfo("UTC")` for datetimes
+- All tests use `ZoneInfo("UTC")` for datetimes — never `timezone.utc`
 - `BalanceDefaultDict` keyed by `BalanceCoordinate`
-- `PrePostingHookArguments` requires `client_transactions={}`
+- `PrePostingHookArguments` and `PostPostingHookArguments` require `client_transactions={}`
 - No `paused_schedule_names` in `ScheduledEventHookArguments`
 - Always mock `vault.get_balances_observation().balances` not `vault.get_balance_timeseries()`
+- `OptionalValue` in test fixtures must wrap `datetime`, not `date` (see SDK behaviours above)
+- Assert **both** legs of a two-CI operation (e.g. net payout AND penalty forfeiture)
 - Coverage threshold: **≥ 90%**
 - Run: `py -m pytest tests/ -v --cov=contracts --cov-report=term-missing`

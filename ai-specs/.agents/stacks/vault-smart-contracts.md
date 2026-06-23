@@ -219,6 +219,79 @@ balances = vault.get_balances_observation(fetcher_id="live_balances").balances
 balances = vault.get_balance_timeseries().latest()
 ```
 
+### 7. Derived parameters — `Parameter(derived=True)`, NOT `DerivedParameter`
+
+`DerivedParameter` does NOT exist in the installed SDK (`ImportError`).
+Derived parameters are declared inside the regular `parameters` list with `derived=True`.
+Their computed values are returned by `derived_parameter_hook`.
+
+```python
+# CORRECT — verified against installed contracts_api
+parameters = [
+    ...
+    Parameter(
+        name="accrued_interest",
+        shape=NumberShape(),
+        level=ParameterLevel.INSTANCE,
+        derived=True,
+        display_name="Accrued Interest",
+    ),
+]
+
+def derived_parameter_hook(vault, hook_arguments):
+    return DerivedParameterHookResult(
+        parameters_return_value={"accrued_interest": accrued}
+    )
+
+# WRONG — DerivedParameter does not exist in this SDK
+from contracts_api import DerivedParameter          # ImportError
+derived_parameters = [DerivedParameter(...)]        # NameError
+```
+
+### 8. `DateShape` inside `OptionalShape` — value is `datetime`, not `date`
+
+`OptionalValue` only accepts `Union[Decimal, str, datetime, UnionItemValue, int]`.
+Passing a `date` object raises `StrongTypingError`. `opt.value` therefore returns a
+`datetime`; call `.date()` on it to get a `date` for comparisons.
+
+```python
+# CORRECT — opt_maturity.value is datetime; .date() extracts date
+opt_maturity = vault.get_parameter_timeseries(name="maturity_date").latest()
+if opt_maturity.is_set():
+    maturity_date  = opt_maturity.value          # datetime
+    effective_date = hook_arguments.effective_datetime.date()   # date
+    if maturity_date.date() <= effective_date:   # date <= date ✅
+        raise ValueError("maturity_date must be in the future.")
+
+# In tests — ALWAYS pass datetime, never date, to OptionalValue
+maturity_val = OptionalValue(datetime(2025, 6, 30, tzinfo=UTC))   # ✅
+maturity_val = OptionalValue(date(2025, 6, 30))                    # ❌ StrongTypingError
+```
+
+### 9. `ParameterLevel.INSTANCE` non-optional shapes require `default_value`
+
+The SDK raises `InvalidSmartContractError` at module load time if an INSTANCE parameter
+uses a non-optional shape (e.g. plain `DateShape()`) and has no `default_value`.
+Use `OptionalShape(shape=DateShape())` when the value can be unset at activation.
+
+```python
+# CORRECT — optional wrapper allows absence of value
+Parameter(
+    name="maturity_date",
+    shape=OptionalShape(shape=DateShape()),
+    level=ParameterLevel.INSTANCE,
+    ...
+)
+
+# WRONG — SDK raises InvalidSmartContractError at import time
+Parameter(
+    name="maturity_date",
+    shape=DateShape(),          # non-optional, no default_value
+    level=ParameterLevel.INSTANCE,
+    ...                         # ❌ InvalidSmartContractError
+)
+```
+
 ---
 
 ## Contract template (API 4.0)

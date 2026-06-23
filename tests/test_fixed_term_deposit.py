@@ -65,14 +65,14 @@ def make_vault(
     accrued_balance: Decimal = Decimal("0"),
     denomination: str = DEFAULT_DENOM,
     annual_interest_rate: Decimal = Decimal("0.05"),
-    maturity_date: datetime = FUTURE_MATURITY,
+    maturity_date=FUTURE_MATURITY,
     allow_early_closure: str = "false",
     early_closure_penalty_rate: Decimal = Decimal("0.20"),
 ) -> MagicMock:
     vault = MagicMock()
     vault.account_id = "test_ftd_account"
 
-    # maturity_date=None simulates an unset OptionalShape parameter
+    # maturity_date is a date object; None simulates an unset OptionalShape parameter
     maturity_val      = OptionalValue(maturity_date) if maturity_date is not None else OptionalValue(None)
     early_closure_val = OptionalValue(UnionItemValue(allow_early_closure))
 
@@ -353,7 +353,7 @@ class TestEarlyClosure:
         assert result.rejection is None
 
     def test_early_closure_penalty_applied(self):
-        """penalty_rate=0.20, accrued=£10 → net_payout=£8 credited to DEFAULT."""
+        """penalty_rate=0.20, accrued=£10 → net_payout=£8 to DEFAULT, £2 to PENALTY_INCOME."""
         vault  = make_vault(
             default_balance=Decimal("0"),
             accrued_balance=Decimal("10"),
@@ -363,9 +363,15 @@ class TestEarlyClosure:
         result = contract.post_posting_hook(vault, make_post_posting_args())
 
         assert len(result.posting_instructions_directives) == 1
-        postings   = result.posting_instructions_directives[0].posting_instructions[0].postings
+        cis        = result.posting_instructions_directives[0].posting_instructions
+        postings   = cis[0].postings
         cr_default = next(p for p in postings if p.credit and p.account_address == "DEFAULT")
         assert cr_default.amount == Decimal("8.00")
+
+        penalty_ci     = cis[1]
+        cr_penalty     = next(p for p in penalty_ci.postings if p.credit)
+        assert cr_penalty.account_address == "PENALTY_INCOME"
+        assert cr_penalty.amount == Decimal("2.00")
 
     def test_early_closure_penalty_floor_zero(self):
         """penalty_rate=1.0, accrued=£1 → net_payout=0, ACCRUED_INTEREST still cleared."""
