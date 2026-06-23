@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest -v)",
+      "Bash(python -m pytest -q)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/ -v *)",
+      "Bash(python -m pytest tests/test_*.py -v)",
+      "Bash(python -m pytest --cov=contracts --cov-report=html)",
+      "Bash(python -m pytest --cov=contracts *)",
+      "Bash(python .openspec-cli/lib/vault_lint.py contracts/)",
+      "Bash(py -m pytest -v)",
+      "Bash(py -m pytest -q)",
+      "Bash(py -m pytest tests/ -v)",
+      "Bash(py -m pytest tests/ -v *)",
+      "Bash(py -m pytest tests/test_*.py -v)",
+      "Bash(py -m pytest --cov=contracts --cov-report=html)",
+      "Bash(py -m pytest --cov=contracts *)",
+      "Bash(py .openspec-cli/lib/vault_lint.py *)",
+      "Bash(py -m pytest tests/ -v --cov=contracts *)",
+      "Write(contracts/*)",
+      "Write(tests/*)",
+      "Write(ai-specs/*)"
+    ]
+  }
+}

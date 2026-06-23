@@ -27,6 +27,7 @@ CONTRACT_ALLOWED_GLOBALS: set[str] = {
     "api", "version", "display_name", "summary", "description",
     "tside", "supported_denominations", "parameters",
     "event_types", "event_types_groups",
+    "balance_observation_fetchers",
     "DEFAULT_ADDRESS", "DEFAULT_ASSET",
 }
 
