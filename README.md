@@ -93,19 +93,34 @@ from Jira — title, description, status, assignee. No copy-pasting context.
 
 ## CLI Commands
 
-### Workflow commands
+### Configuration
 
 | Command | What it does |
 |---|---|
-| `os-agent` | Switch active AI agent |
-| `os-stack` | Switch active tech stack |
-| `os-enrich` | Enrich a Jira ticket with technical detail |
-| `os-enrich-apply` | Upload enriched content to Jira |
-| `os-plan` | Generate an implementation plan from a Jira ticket |
-| `os-develop` | Create feature branch + implementation prompt |
-| `os-commit` | Commit, push and open PR |
-| `os-review` | Generate a structured AI code review for a PR |
-| `os-review-apply` | Publish the review to GitHub and apply verdict |
+| `os-stack [--list\|<name>]` | List or switch active tech stack |
+| `os-agent [--list\|<name>]` | List or switch active AI agent |
+
+### Jira
+
+| Command | What it does |
+|---|---|
+| `os-tickets [status]` | List all project tickets, optionally filtered by status |
+| `os-create-ticket --hu` | Create a ticket with an AI-generated user story |
+| `os-create-ticket "<title>" <type>` | Create a ticket quickly (Task, Bug, Story…) |
+| `os-enrich <KAN-XX>` | Enrich a ticket with technical detail |
+| `os-enrich-apply <KAN-XX>` | Upload enriched content to Jira |
+| `os-transition <KAN-XX> [--list\|<state>]` | List transitions or move ticket to a state |
+
+### Development workflow
+
+| Command | What it does |
+|---|---|
+| `os-plan <KAN-XX>` | Generate an implementation plan from a Jira ticket |
+| `os-develop <KAN-XX>` | Create feature branch + implementation prompt |
+| `os-commit <KAN-XX>` | Commit, push and open PR → develop |
+| `os-review <PR>` | Generate a structured AI code review for a PR |
+| `os-review-apply <PR>` | Publish the review to GitHub and apply verdict |
+| `os-review-fix <PR>` | Auto-fix REQUEST CHANGES feedback, re-review and re-publish |
 
 ### Vault Smart Contract commands
 
@@ -246,13 +261,21 @@ os-vault-account <product_version_id> \
 os-vault-balances <account_id>         # fetch live balances
 ```
 
+### Contracts
+
+| Contract | Description | Tests |
+| --- | --- | --- |
+| `contracts/savings_product.py` | Savings account with monthly interest accrual | 18 ✅ |
+| `contracts/current_account.py` | Current account with configurable overdraft | 20 ✅ |
+| `contracts/fixed_term_deposit.py` | Fixed-term deposit: daily accrual, maturity disbursement, early closure with penalty | 31 ✅ |
+
 ### CI integration
 
 The GitHub Actions workflow runs three steps in order for every push:
 
-1. **Run Vault lint** — `python .openspec-cli/lib/vault_lint.py contracts/`
-2. **Run vault_lint unit tests** — `pytest tests/test_vault_lint.py --cov=vault_lint --cov-fail-under=90`
-3. **Run Vault Smart Contract tests** — `pytest tests/test_savings_product.py --cov=contracts --cov-fail-under=90`
+1. **Vault lint** — `python .openspec-cli/lib/vault_lint.py contracts/`
+2. **vault_lint unit tests** — `pytest tests/test_vault_lint.py --cov=vault_lint --cov-fail-under=90`
+3. **Smart Contract tests** — `pytest tests/test_savings_product.py tests/test_current_account.py tests/test_fixed_term_deposit.py --cov=contracts --cov-fail-under=90`
 
 ---
 

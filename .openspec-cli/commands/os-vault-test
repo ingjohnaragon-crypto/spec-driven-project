@@ -15,13 +15,15 @@ OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
 
-TEST_TARGET="${1:-tests/}"
+TEST_TARGET="tests/"
 COVERAGE=false
 
 # Parse flags
 for arg in "$@"; do
     case $arg in
         --coverage) COVERAGE=true ;;
+        -*) ;;  # ignore unknown flags
+        *)  TEST_TARGET="${arg}" ;;
     esac
 done
 
