@@ -55,6 +55,7 @@ supported_denominations = ["GBP"]
 DEFAULT_ADDRESS  = "DEFAULT"
 DEFAULT_ASSET    = "COMMERCIAL_BANK_MONEY"
 ACCRUED_INTEREST = "ACCRUED_INTEREST"
+PENALTY_INCOME   = "PENALTY_INCOME"
 DAILY_ACCRUAL    = "DAILY_ACCRUAL"
 MATURITY_EVENT   = "MATURITY_EVENT"
 
@@ -337,7 +338,7 @@ def post_posting_hook(
                     amount=penalty,
                     denomination=denomination,
                     account_id=vault.account_id,
-                    account_address=DEFAULT_ADDRESS,
+                    account_address=PENALTY_INCOME,
                     asset=DEFAULT_ASSET,
                     phase=Phase.COMMITTED,
                 ),
