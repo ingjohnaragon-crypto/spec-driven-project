@@ -12,9 +12,40 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/language.sh"
+
+# Prefer Git for Windows sh/bash over the WSL stub in WindowsApps.
+# Without this, husky/pre-commit can fail with:
+#   HCS_E_SERVICE_NOT_AVAILABLE / "Bash/Service/CreateInstance/..."
+os_prefer_git_bash() {
+  _git_bins=""
+  for _candidate in \
+    "/c/Program Files/Git/bin" \
+    "/c/Program Files/Git/usr/bin" \
+    "/c/Program Files (x86)/Git/bin" \
+    "/c/Program Files (x86)/Git/usr/bin" \
+    "/mnt/c/Program Files/Git/bin" \
+    "/mnt/c/Program Files/Git/usr/bin"
+  do
+    if [ -d "$_candidate" ]; then
+      _git_bins="${_git_bins}${_candidate}:"
+    fi
+  done
+  if [ -n "${PROGRAMFILES:-}" ] && [ -d "$PROGRAMFILES/Git/bin" ]; then
+    _git_bins="${_git_bins}${PROGRAMFILES}/Git/bin:${PROGRAMFILES}/Git/usr/bin:"
+  fi
+  if [ -n "$_git_bins" ]; then
+    PATH="${_git_bins}${PATH}"
+    export PATH
+  fi
+  unset _candidate _git_bins
+}
+
+os_prefer_git_bash
 
 os_load_config
 os_load_env
+os_load_language
 
 cd "$OS_REPO_ROOT"
 
@@ -43,7 +74,6 @@ if [ "$IS_PROTECTED" = "true" ]; then
   os_warn "OpenSpec never commits directly to $CURRENT_BRANCH."
   os_divider
 
-  # Build feature branch name
   if [ -n "$TICKET_ID" ]; then
     FEATURE_BRANCH="feature/${TICKET_ID}-$(date +%Y%m%d)"
   else
@@ -80,14 +110,59 @@ git add -u
 
 for f in $UNTRACKED; do
   case "$f" in
-    .env|*.env|*.secret|build/|dist/|target/|node_modules/|__pycache__/)
+    .env|*.env|*.secret|build/*|dist/*|target/*|node_modules/*|__pycache__/*|.venv/*|venv/*|.pytest_cache/*|htmlcov/*|coverage/*|.cache/*|*.pyc|*.pack|*.pack.old)
       os_warn "Skipping: $f"
       ;;
+    openspec/config.yaml)
+      os_warn "Skipping local OpenSpec config: $f"
+      ;;
     *)
+      if [ -n "$TICKET_ID" ]; then
+        case "$f" in
+          ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
+            case "$f" in
+              *"${TICKET_ID}"*) ;;
+              *)
+                os_warn "Skipping unrelated artifact: $f"
+                continue
+                ;;
+            esac
+            ;;
+        esac
+      fi
       git add "$f"
       ;;
   esac
 done
+
+# Unstage artifacts that may already be tracked or were force-added
+STAGED_RAW=$(git diff --cached --name-only || true)
+if [ -n "$STAGED_RAW" ]; then
+  echo "$STAGED_RAW" | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      node_modules/*|dist/*|build/*|coverage/*|htmlcov/*|.cache/*|__pycache__/*|.venv/*|venv/*|*.pyc|*.pack|*.pack.old)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged artifact: $f"
+        ;;
+      openspec/config.yaml)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged local OpenSpec config: $f"
+        ;;
+      ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
+        if [ -n "$TICKET_ID" ]; then
+          case "$f" in
+            *"${TICKET_ID}"*) ;;
+            *)
+              git reset HEAD -- "$f" >/dev/null 2>&1 || true
+              os_warn "Unstaged unrelated artifact: $f"
+              ;;
+          esac
+        fi
+        ;;
+    esac
+  done
+fi
 
 STAGED=$(git diff --cached --name-only)
 if [ -z "$STAGED" ]; then
@@ -98,16 +173,17 @@ fi
 os_info "Staged files:"
 echo "$STAGED" | sed 's/^/  /'
 
+os_info "Note: CRLF/LF line-ending notices from git are informational only."
+
 # ── Determine scope ──────────────────────────────────────────
 SCOPE=$(echo "$STAGED" \
-  | grep -oE 'src/[^/]+/[^/]+/[^/]+' \
-  | awk -F'/' '{print $4}' \
+  | grep -oE 'contracts/[^/]+' \
+  | sed 's|contracts/||;s|\.py$||' \
   | sort | uniq -c | sort -rn \
   | head -1 | awk '{print $2}' \
-  | tr '[:upper:]' '[:lower:]' \
-  | sed 's/controller//;s/service//;s/handler//')
+  | tr '[:upper:]' '[:lower:]')
 
-[ -z "$SCOPE" ] && SCOPE="app"
+[ -z "$SCOPE" ] && SCOPE="vault"
 
 # ── Build commit message ─────────────────────────────────────
 os_step "Building commit message..."
@@ -124,15 +200,28 @@ esac
 
 FILE_COUNT=$(echo "$STAGED" | wc -l | tr -d ' ')
 
-if [ -n "$TICKET_ID" ]; then
-  SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
-  BODY="- Implements $TICKET_ID: changes across $FILE_COUNT file(s)
+if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+  if [ -n "$TICKET_ID" ]; then
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): implementa $TICKET_ID"
+    BODY="- Implementa $TICKET_ID: cambios en $FILE_COUNT archivo(s)
+- Stack: $OS_ACTIVE_STACK
+- Rama: $CURRENT_BRANCH"
+  else
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): aplica cambios de $CURRENT_BRANCH"
+    BODY="- Cambios en $FILE_COUNT archivo(s)
+- Stack: $OS_ACTIVE_STACK"
+  fi
+else
+  if [ -n "$TICKET_ID" ]; then
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
+    BODY="- Implements $TICKET_ID: changes across $FILE_COUNT file(s)
 - Stack: $OS_ACTIVE_STACK
 - Branch: $CURRENT_BRANCH"
-else
-  SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
-  BODY="- Changes across $FILE_COUNT file(s)
+  else
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
+    BODY="- Changes across $FILE_COUNT file(s)
 - Stack: $OS_ACTIVE_STACK"
+  fi
 fi
 
 os_divider
@@ -155,7 +244,16 @@ case "$confirm" in
 esac
 
 # ── Commit ───────────────────────────────────────────────────
-git commit -m "$SUBJECT" -m "$BODY"
+os_prefer_git_bash
+os_step "Running git commit (pre-commit hooks may run)..."
+if ! git commit -m "$SUBJECT" -m "$BODY"; then
+  os_warn "Commit failed (often a pre-commit hook)."
+  os_warn "On Windows: ensure Git for Windows is installed and PATH prefers"
+  os_warn "  'C:\\Program Files\\Git\\bin' over WindowsApps\\bash.exe (WSL stub)."
+  os_warn "If you see HCS_E_SERVICE_NOT_AVAILABLE, the shell failed — not the linter."
+  os_warn "Re-run from Git Bash or fix PATH, then os-commit again."
+  exit 1
+fi
 os_success "Committed: $SUBJECT"
 
 # ── Push ─────────────────────────────────────────────────────
@@ -171,27 +269,52 @@ fi
 
 os_step "Creating Pull Request → develop..."
 
-if [ -n "$TICKET_ID" ]; then
-  PR_TITLE="[$TICKET_ID] $SUBJECT"
-  PR_BODY="## Summary
+if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+  if [ -n "$TICKET_ID" ]; then
+    PR_TITLE="[$TICKET_ID] $SUBJECT"
+    PR_BODY="## Resumen
+Implementa $TICKET_ID en el stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Cambios
+$(echo "$STAGED" | sed 's/^/- /')
+
+## Checklist
+- [ ] Tests pasan (\`os-vault-test\` / \`$OS_TEST_CMD\`)
+- [ ] Cobertura >= 90% (\`$OS_COVERAGE_CMD\`)
+- [ ] Documentación actualizada
+- [ ] El contrato respeta las restricciones del sandbox Vault"
+  else
+    PR_TITLE="$SUBJECT"
+    PR_BODY="## Resumen
+Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Rama: $CURRENT_BRANCH
+
+## Cambios
+$(echo "$STAGED" | sed 's/^/- /')"
+  fi
+else
+  if [ -n "$TICKET_ID" ]; then
+    PR_TITLE="[$TICKET_ID] $SUBJECT"
+    PR_BODY="## Summary
 Implements $TICKET_ID on stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 
 ## Changes
 $(echo "$STAGED" | sed 's/^/- /')
 
 ## Checklist
-- [ ] Tests pass (\`$OS_TEST_CMD\`)
+- [ ] Tests pass (\`os-vault-test\` / \`$OS_TEST_CMD\`)
 - [ ] Coverage >= 90% (\`$OS_COVERAGE_CMD\`)
 - [ ] Documentation updated
-- [ ] Endpoints manually tested"
-else
-  PR_TITLE="$SUBJECT"
-  PR_BODY="## Summary
+- [ ] Contract respects Vault Python sandbox restrictions"
+  else
+    PR_TITLE="$SUBJECT"
+    PR_BODY="## Summary
 Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Branch: $CURRENT_BRANCH
 
 ## Changes
 $(echo "$STAGED" | sed 's/^/- /')"
+  fi
 fi
 
 PR_URL=$(gh pr create \
@@ -205,38 +328,4 @@ os_success "Pull Request created → develop"
 os_info    "$PR_URL"
 os_divider
 
-# ── Save commit record ────────────────────────────────────────
-if [ -n "$TICKET_ID" ]; then
-  CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
-  mkdir -p "$CHANGES_DIR"
-  COMMIT_FILE="$CHANGES_DIR/${TICKET_ID}_commit.md"
-  PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$' || echo "?")
-
-  cat > "$COMMIT_FILE" << RECORD_EOF
-# Commit Record: $TICKET_ID
-
-## Branch
-$CURRENT_BRANCH
-
-## Commit
-- **Message**: $SUBJECT
-- **Files changed**: $FILE_COUNT file(s)
-- **Stack**: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-
-## Changed Files
-$(echo "$STAGED" | sed 's/^/- /')
-
-## Pull Request
-- **URL**: $PR_URL
-- **Base branch**: develop
-- **Status**: Open
-
-## Next Steps
-- [ ] \`os-review $PR_NUMBER\` — generate code review
-- [ ] \`os-review-apply $PR_NUMBER\` — publish to GitHub
-- [ ] \`os-transition $TICKET_ID "In Review"\` — update Jira
-RECORD_EOF
-
-  os_info "Commit record: ai-specs/changes/${TICKET_ID}_commit.md"
-  os_divider
-fi
+os_info "Next: os-review <PR_NUMBER> then os-review-apply <PR_NUMBER>"

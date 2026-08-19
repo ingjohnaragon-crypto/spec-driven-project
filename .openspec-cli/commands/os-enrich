@@ -9,6 +9,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
 . "$CLI_DIR/lib/agent.sh"
+. "$CLI_DIR/lib/language.sh"
 
 if [ -z "$TICKET_ID" ]; then
   os_error "Usage: os-enrich <TICKET-ID>"
@@ -18,10 +19,14 @@ fi
 os_load_config
 os_load_env
 os_load_agent
+os_load_language
 os_print_config
+os_print_language
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
+os_jira_fetch_subtasks "$TICKET_ID"
+os_jira_print_subtasks
 
 # ── Load context ─────────────────────────────────────────────
 AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
@@ -41,6 +46,10 @@ You are acting as a product expert with technical knowledge for an openspec proj
 Enrich the following Jira ticket with the technical detail a developer needs to be
 fully autonomous — no back-and-forth required.
 
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
+
 ## Active Stack
 Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 
@@ -52,6 +61,10 @@ Assignee: $JIRA_ASSIGNEE
 
 ### Original Description
 $JIRA_DESCRIPTION
+
+---
+## Subtasks
+$JIRA_SUBTASKS_CONTEXT
 
 ---
 ## Stack Agent (technical context)
@@ -74,18 +87,7 @@ $DATA_MODEL
 $ENRICH_TEMPLATE
 
 ---
-## Output Instructions
-Produce ONLY the enhanced description in markdown — no preamble, no explanation.
-Include:
-- Full description of the functionality
-- Fields to create or update
-- Endpoint URLs, HTTP methods, request/response shapes
-- Files to create or modify (with their architecture layer)
-- Acceptance criteria
-- Unit test cases to cover
-- Non-functional requirements (security, performance, validation)
-
-Write everything in English.
+Follow the "## Active Language" directive above for all text.
 PROMPT_EOF
 )
 
@@ -93,51 +95,29 @@ PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
 
-CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes/enriquecimientos/${TICKET_ID}"
 ARCHIVE_FILE="$CHANGES_DIR/${TICKET_ID}_enriched.md"
 mkdir -p "$CHANGES_DIR"
+rm -f "$ARCHIVE_FILE"
 
 os_divider
 
 # ── Deliver and capture output ────────────────────────────────
-if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
-  # CLI agent — ejecuta y captura automáticamente
-  os_step "Sending prompt to $OS_AGENT_LABEL..."
-  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
-  cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
-  os_success "Enriched content saved!"
-  os_info "Working : .openspec-cli/.enriched-content.md"
-  os_info "Archive : ai-specs/changes/${TICKET_ID}_enriched.md"
-  os_divider
-  os_info "Preview (first 10 lines):"
-  head -10 "$OUTPUT_FILE"
-  os_divider
-  os_info "Next step: os-enrich-apply $TICKET_ID"
+os_deliver_prompt_capture "$PROMPT_FILE" "$OUTPUT_FILE"
+if [ -s "$ARCHIVE_FILE" ]; then
+  # CLI agents with filesystem access write the archive file themselves
+  # per enrich-us.md; stdout may only carry a short confirmation.
+  cp "$ARCHIVE_FILE" "$OUTPUT_FILE"
 else
-  # Clipboard agent — copia prompt y espera que el usuario pegue el output
-  printf '%s' "$PROMPT" | clip 2>/dev/null || true
-  os_success "Prompt copied to clipboard!"
-  os_divider
-  os_info "1. Paste in $OS_AGENT_LABEL"
-  os_info "2. Copy the AI output"
-  os_info "3. Press Enter here when ready..."
-  read -r _dummy
-  os_step "Paste the enriched content (CTRL+Z + Enter to finish on Windows):"
-  OUTPUT=""
-  while IFS= read -r line 2>/dev/null; do
-    OUTPUT="${OUTPUT}${line}
-"
-  done
-  printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
   cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
-  os_success "Saved!"
-  os_info "Working : .openspec-cli/.enriched-content.md"
-  os_info "Archive : ai-specs/changes/${TICKET_ID}_enriched.md"
-  os_divider
-  os_info "Preview (first 10 lines):"
-  head -10 "$OUTPUT_FILE"
-  os_divider
-  os_info "Next step: os-enrich-apply $TICKET_ID"
 fi
+os_success "Enriched content saved!"
+os_info "Working : .openspec-cli/.enriched-content.md"
+os_info "Archive : ai-specs/changes/enriquecimientos/${TICKET_ID}/${TICKET_ID}_enriched.md"
+os_divider
+os_info "Preview (first 10 lines):"
+head -10 "$OUTPUT_FILE"
+os_divider
+os_info "Next step: os-enrich-apply $TICKET_ID"
 
 os_divider
