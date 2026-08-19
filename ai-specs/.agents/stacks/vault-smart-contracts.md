@@ -470,7 +470,7 @@ os-agent claude-code              # or copilot
 
 os-enrich KAN-15                  # enriches ticket with hooks + params
 os-enrich-apply KAN-15
-os-plan KAN-15                    # generates plan in ai-specs/changes/
+os-plan KAN-15                    # generates plan in ai-specs/changes/planes/
 os-develop KAN-15                 # creates branch + scaffold
 
 os-vault-test                     # run 18 tests locally with SDK

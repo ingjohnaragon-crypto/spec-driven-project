@@ -1,4 +1,5 @@
 #!/usr/bin/bash
+# os-tickets [status] [--project KEY]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -12,8 +13,23 @@ export OS_REPO_ROOT="$(pwd)"
 os_load_env
 source "${OS_CLI_LIB}/jira.sh"
 
-STATUS_FILTER="${1:-}"
-PROJECT_KEY="${JIRA_PROJECT_KEY:-KAN}"
+STATUS_FILTER=""
+PROJECT_KEY_OVERRIDE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --project|-p)
+      shift
+      PROJECT_KEY_OVERRIDE="${1:-}"
+      ;;
+    *)
+      [ -z "$STATUS_FILTER" ] && STATUS_FILTER="$1"
+      ;;
+  esac
+  shift
+done
+
+PROJECT_KEY="${PROJECT_KEY_OVERRIDE:-${JIRA_PROJECT_KEY:-KAN}}"
 
 os_divider
 os_label "  OpenSpec — Jira Tickets  [$PROJECT_KEY]"
@@ -25,7 +41,7 @@ echo "$TICKET_LIST"
 os_divider
 
 # ── Save snapshot ─────────────────────────────────────────────
-CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
+CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes/tickets"
 mkdir -p "$CHANGES_DIR"
 SNAPSHOT_FILE="$CHANGES_DIR/tickets-$(date +%Y%m%d).md"
 
@@ -34,5 +50,5 @@ printf 'Project : %s\n' "$PROJECT_KEY"               >> "$SNAPSHOT_FILE"
 [ -n "$STATUS_FILTER" ] && printf 'Filter  : %s\n' "$STATUS_FILTER" >> "$SNAPSHOT_FILE"
 printf '\n```\n%s\n```\n' "$TICKET_LIST"              >> "$SNAPSHOT_FILE"
 
-os_info "Snapshot: ai-specs/changes/tickets-$(date +%Y%m%d).md"
+os_info "Snapshot: ai-specs/changes/tickets/tickets-$(date +%Y%m%d).md"
 os_divider

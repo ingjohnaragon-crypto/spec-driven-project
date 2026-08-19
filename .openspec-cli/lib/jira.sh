@@ -58,6 +58,62 @@ print(adf(raw).strip() or 'No description provided.')
   os_success "Ticket: [$JIRA_STATUS] $JIRA_SUMMARY"
 }
 
+# ── Fetch subtasks of a ticket (the HU) ──────────────────────
+os_jira_fetch_subtasks() {
+  ticket_id="$1"
+  os_step "Fetching subtasks for $ticket_id..."
+
+  response=$(curl -s \
+    -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+    -H "Accept: application/json" \
+    -G \
+    --data-urlencode "jql=parent=$ticket_id ORDER BY created ASC" \
+    --data-urlencode "fields=summary,status,issuetype,description,assignee" \
+    --data-urlencode "maxResults=50" \
+    "$JIRA_BASE_URL/rest/api/3/search/jql")
+
+  JIRA_SUBTASK_KEYS=$(echo "$response" | py -c \
+    "import sys,json; d=json.load(sys.stdin); print(' '.join(i['key'] for i in d.get('issues',[])))" \
+    2>/dev/null || echo "")
+
+  JIRA_SUBTASKS_CONTEXT=$(echo "$response" | py -c \
+"import sys,json
+def adf(n):
+  if not n: return ''
+  t=n.get('type','')
+  if t=='text': return n.get('text','')
+  if t=='hardBreak': return '\n'
+  return ''.join(adf(c) for c in n.get('content',[]))+(('\n') if t in ('paragraph','heading','listItem','bulletList','orderedList') else '')
+d=json.load(sys.stdin)
+blocks=[]
+for i in d.get('issues',[]):
+  f=i['fields']
+  desc=adf(f.get('description') or {}).strip() or 'No description provided.'
+  blocks.append('### '+i['key']+' - '+f['summary']+'\nStatus: '+f['status']['name']+'\n\n'+desc)
+print('\n\n---\n\n'.join(blocks) if blocks else 'No subtasks found for this ticket.')
+" 2>/dev/null || echo "No subtasks found for this ticket.")
+
+  export JIRA_SUBTASK_KEYS JIRA_SUBTASKS_CONTEXT
+
+  count=0
+  for _k in $JIRA_SUBTASK_KEYS; do count=$((count + 1)); done
+  os_success "Found $count subtask(s)"
+}
+
+# ── Print subtasks summary ───────────────────────────────────
+os_jira_print_subtasks() {
+  if [ -z "$JIRA_SUBTASK_KEYS" ]; then
+    os_info "Subtasks : none"
+    return
+  fi
+  os_divider
+  os_label "  Subtasks:"
+  for _k in $JIRA_SUBTASK_KEYS; do
+    os_info "  - $_k"
+  done
+  os_divider
+}
+
 # ── Print ticket summary ─────────────────────────────────────
 os_jira_print_ticket() {
   os_divider

@@ -5,12 +5,12 @@ PR Number: $ARGUMENTS
 ## Goal
 After addressing all issues from a code review, generate a structured fix report
 that summarises what was resolved and confirms the PR is ready for re-review.
-Save the result to `ai-specs/changes/` so the fix cycle is fully traceable.
+Persist only a temporary working file under `.openspec-cli/` (GitHub is the archive).
 
 ## Pre-flight checklist
 
-1. Read the original review at `ai-specs/changes/<ticket-id>_review.md`
-   — Fall back to `.openspec-cli/.review-output.md` if the archive is not found
+1. Read the original review at `.openspec-cli/.review-output.md` or
+   `.openspec-cli/.review-output.md.applied` (and/or the GitHub PR review comment)
 2. Read `openspec/config.yaml` — active stack, tooling commands
 3. Verify current test status: `{{test_command}}`
 4. Verify coverage: `{{coverage_command}}`
@@ -23,11 +23,16 @@ Save the result to `ai-specs/changes/` so the fix cycle is fully traceable.
 4. Note any issues intentionally deferred, with justification
 5. Record test and coverage results
 6. Emit a final verdict: READY FOR RE-REVIEW / NEEDS FURTHER WORK
-7. **Save the report** to `ai-specs/changes/<ticket-id>_fix.md`
+7. **Save the report** to `.openspec-cli/.fix-report.md` (do **not** create
+   fix reports under `ai-specs/changes/`)
+
+## Language
+
+Write the entire report (including section headers) in the Active Language from the prompt.
 
 ## Output format
 
-Save a markdown file at `ai-specs/changes/<ticket-id>_fix.md` with this structure:
+Save a markdown file at `.openspec-cli/.fix-report.md` with this structure:
 
 ---
 
@@ -35,7 +40,7 @@ Save a markdown file at `ai-specs/changes/<ticket-id>_fix.md` with this structur
 
 ### `## Original Verdict`
 The verdict from the previous review (REQUEST CHANGES / COMMENT ONLY).
-Review file: `ai-specs/changes/<ticket-id>_review.md`
+Review file: `.openspec-cli/.review-output.md`
 
 ### `## Issues Addressed`
 For each fixed issue:
@@ -66,5 +71,5 @@ Brief explanation of confidence level.
 
 ## Final message format
 
-> Fix report saved to `ai-specs/changes/<ticket-id>_fix.md`.
+> Fix report saved to `.openspec-cli/.fix-report.md`.
 > Run `os-review <PR_NUMBER>` to generate a fresh review, then `os-review-apply <PR_NUMBER>`.
