@@ -55,14 +55,90 @@ def _quantize(amount: Decimal, scale: int = 2) -> Decimal:
 
 
 def _calculate_schedule(principal: Decimal, annual_rate: Decimal, term_months: int, denomination: str):
-    """Pure helper to compute a monthly amortization schedule.
+    """Pure helper to compute a monthly amortization schedule (annuity).
 
-    Returns a list of dict entries: { 'date': ..., 'principal_due': Decimal, 'interest_due': Decimal }
-    This is a placeholder implementation; tests should exercise a concrete
-    repayment algorithm and rounding behavior.
+    Conventions:
+    - annual_rate is specified as percent (e.g. Decimal('5') for 5%% per year)
+    - term_months is the number of monthly payments (integer)
+
+    Returns a list of dict entries with keys:
+      - period: int (1-based)
+      - payment: Decimal (total payment for the period)
+      - principal_due: Decimal
+      - interest_due: Decimal
+      - balance: Decimal (remaining principal after payment)
+
+    Rounding: every monetary value is quantized to 2 decimal places using
+    ROUND_HALF_UP. The algorithm keeps equal payments for each period where
+    possible and adjusts the final principal tranche to clear rounding residuals.
     """
-    # TODO: Implement amortization algorithm (e.g., standard annuity)
-    return []
+    if term_months <= 0:
+        raise ValueError('term_months must be > 0')
+
+    # Normalize inputs to Decimal
+    principal = Decimal(principal)
+    annual_rate = Decimal(annual_rate)
+    n = int(term_months)
+
+    # monthly rate as a decimal fraction (e.g. 0.01 for 1%%)
+    monthly_rate = (annual_rate / Decimal('100')) / Decimal('12')
+
+    schedule = []
+    # If rate is zero, payment is simply principal/n
+    if monthly_rate == Decimal('0'):
+        payment = _quantize(principal / Decimal(n))
+        remaining = _quantize(principal)
+        for period in range(1, n + 1):
+            principal_due = payment
+            # For the last period, clear any remainder due to rounding
+            if period == n:
+                principal_due = _quantize(remaining)
+            interest_due = _quantize(Decimal('0'))
+            remaining = _quantize(remaining - principal_due)
+            schedule.append({
+                'period': period,
+                'payment': _quantize(interest_due + principal_due),
+                'principal_due': _quantize(principal_due),
+                'interest_due': _quantize(interest_due),
+                'balance': remaining,
+            })
+        return schedule
+
+    # annuity payment formula: A = P * r / (1 - (1+r) ** -n)
+    # compute (1+r) ** n with Decimal
+    one_plus_r_pow_n = (Decimal('1') + monthly_rate) ** n
+    annuity_payment = principal * monthly_rate / (Decimal('1') - (Decimal('1') / one_plus_r_pow_n))
+    payment = _quantize(annuity_payment)
+
+    remaining = _quantize(principal)
+
+    for period in range(1, n + 1):
+        interest_due = _quantize(remaining * monthly_rate)
+        principal_due = _quantize(payment - interest_due)
+
+        # Ensure we do not overpay principal in the final period due to rounding
+        if principal_due > remaining:
+            principal_due = _quantize(remaining)
+            payment = _quantize(interest_due + principal_due)
+
+        remaining = _quantize(remaining - principal_due)
+
+        schedule.append({
+            'period': period,
+            'payment': payment,
+            'principal_due': principal_due,
+            'interest_due': interest_due,
+            'balance': remaining,
+        })
+
+    # If any tiny residual remains (due to quantize), adjust the last entry
+    if schedule and schedule[-1]['balance'] != Decimal('0.00'):
+        residual = schedule[-1]['balance']
+        schedule[-1]['principal_due'] = _quantize(schedule[-1]['principal_due'] + residual)
+        schedule[-1]['payment'] = _quantize(schedule[-1]['payment'] + residual)
+        schedule[-1]['balance'] = Decimal('0.00')
+
+    return schedule
 
 
 # -- Hooks (skeletons) ---------------------------------------------------
