@@ -146,14 +146,36 @@ def _calculate_schedule(principal: Decimal, annual_rate: Decimal, term_months: i
 def activation_hook(hook_arguments):
     """Handle product activation: create initial postings to disburse principal.
 
-    Expected to return a CustomInstruction or list of postings/instructions
-    according to the Vault API conventions.
+    Attempts to read 'principal' and 'denomination' from hook_arguments and
+    returns a CustomInstruction-like structure representing the disbursement.
+    The returned structure is a SDK CustomInstruction when available or a
+    dict fallback suitable for unit tests.
     """
-    # TODO: Read parameters, build CustomInstruction to disburse principal
-    # Example (pseudocode):
-    # instruction = CustomInstruction(postings=[...], instruction_details={...})
-    # return instruction
-    return None
+    principal = _extract_value(hook_arguments, 'principal', 'amount', 'product_principal')
+    denom = _extract_value(hook_arguments, 'denomination', 'denom', 'currency', default='GBP')
+
+    if principal is None:
+        return None
+
+    try:
+        principal = Decimal(principal)
+    except Exception:
+        return None
+
+    principal_q = _quantize(principal)
+
+    disbursement_posting = {
+        'amount': str(principal_q),
+        'denomination': denom,
+        'narrative': 'Loan principal disbursement',
+        'type': 'disbursement',
+    }
+
+    details = {
+        'description': 'Activation disbursement',
+    }
+
+    return _build_custom_instruction([disbursement_posting], details)
 
 
 def _build_rejection(message: str, reason_code=None):
@@ -386,8 +408,12 @@ def pre_posting_code(hook_arguments):
 
 
 def post_posting_code(hook_arguments):
-    """Optional: handle post-posting tasks like bookkeeping or schedule updates."""
-    # TODO: implement if needed
+    """Optional: handle post-posting tasks like bookkeeping or schedule updates.
+
+    Currently a no-op placeholder to keep hooks explicit. Implementers can
+    extend this to update any remote bookkeeping structures or emit events.
+    """
+    # No-op by design for now
     return None
 
 
