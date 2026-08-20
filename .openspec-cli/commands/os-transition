@@ -4,32 +4,58 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 
+# shellcheck source=/dev/null
 source "${OS_CLI_LIB}/colors.sh"
+# shellcheck source=/dev/null
 source "${OS_CLI_LIB}/config.sh"
-export OS_REPO_ROOT="$(pwd)"
+export OS_REPO_ROOT
+OS_REPO_ROOT="$(pwd)"
 os_load_env
+
+if [ ! -f "${OS_CLI_LIB}/jira.sh" ]; then
+  os_error "Missing ${OS_CLI_LIB}/jira.sh — reinstall: sh .openspec-cli/install.sh"
+  exit 1
+fi
+# shellcheck source=/dev/null
 source "${OS_CLI_LIB}/jira.sh"
 
 TICKET_ID="${1:-}"
 TRANSITION="${2:-}"
 
 if [ -z "$TICKET_ID" ]; then
-  os_error "Usage: os-transition <TICKET-ID> <status|--list>"
+  os_error "Usage: os-transition <TICKET-ID> [<status>|--list]"
   exit 1
 fi
+
+os_require_jira_env
 
 os_divider
 os_label "  OpenSpec — Jira Transition"
 os_divider
 
-if [ "$TRANSITION" = "--list" ] || [ -z "$TRANSITION" ]; then
+if [ "$TRANSITION" = "--list" ]; then
   os_info "Available transitions for $TICKET_ID:"
   os_divider
   os_jira_get_transitions "$TICKET_ID" | while IFS='|' read -r id name; do
-    os_info "  $name"
+    [ -n "$name" ] && os_info "  $name"
   done
   os_divider
-  printf "Move to: "; read -r TRANSITION
+  exit 0
+fi
+
+if [ -z "$TRANSITION" ]; then
+  os_info "Available transitions for $TICKET_ID:"
+  os_divider
+  os_jira_get_transitions "$TICKET_ID" | while IFS='|' read -r id name; do
+    [ -n "$name" ] && os_info "  $name"
+  done
+  os_divider
+  printf "Move to: "
+  read -r TRANSITION
+  if [ -z "$TRANSITION" ]; then
+    os_warn "Aborted (empty status)."
+    exit 0
+  fi
 fi
 
 os_jira_transition "$TICKET_ID" "$TRANSITION"

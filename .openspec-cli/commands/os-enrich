@@ -38,10 +38,30 @@ DATA_MODEL="";        DM_FILE="$OS_REPO_ROOT/ai-specs/specs/data-model.md"
 ENRICH_TEMPLATE="";   CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/enrich-us.md"
                       [ -f "$CMD_FILE" ] && ENRICH_TEMPLATE=$(cat "$CMD_FILE" | sed "s|\$ARGUMENTS|$TICKET_ID|g")
 
+CHEATSHEET_FILE="$CLI_DIR/lib/vault-enrich-cheatsheet.md"
+CHEATSHEET=""
+[ -f "$CHEATSHEET_FILE" ] && CHEATSHEET=$(cat "$CHEATSHEET_FILE")
+
 # ── Build prompt ─────────────────────────────────────────────
+# Clipboard agents (Copilot) choke on huge pastes (~full agent+standards).
+# CLI agents can consume the full context; clipboard gets a slim prompt.
 os_step "Building enrichment prompt..."
 
-PROMPT=$(cat << PROMPT_EOF
+CLIPBOARD_OUTPUT_RULES="
+## Output rules (clipboard / Copilot — mandatory)
+- Reply with ONLY the enriched markdown document.
+- Start with the title heading exactly:
+  - Spanish: \`# Ticket enriquecido: $TICKET_ID — <Summary>\`
+  - English: \`# Enriched Ticket: $TICKET_ID — <Summary>\`
+- Do NOT repeat this prompt, the stack agent, standards, or chat preamble.
+- Do NOT say you saved a file. You cannot write to disk here.
+- Keep it readable for Jira: short paragraphs, one criterion per line, no giant code dumps.
+- Prefer bullets over long prose. Put code only when a signature or example is essential.
+- Target length: roughly 120-250 lines max.
+"
+
+if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
+  PROMPT=$(cat << PROMPT_EOF
 You are acting as a product expert with technical knowledge for an openspec project.
 Enrich the following Jira ticket with the technical detail a developer needs to be
 fully autonomous — no back-and-forth required.
@@ -90,10 +110,51 @@ $ENRICH_TEMPLATE
 Follow the "## Active Language" directive above for all text.
 PROMPT_EOF
 )
+else
+  # Slim prompt for Copilot / Cursor clipboard delivery
+  PROMPT=$(cat << PROMPT_EOF
+Enrich this Jira ticket for a Vault Smart Contract (Thought Machine, API 4.0).
+
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
+
+## Active Stack
+Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+
+## Jira Ticket: $JIRA_TICKET_ID
+Type    : $JIRA_TYPE
+Status  : $JIRA_STATUS
+Summary : $JIRA_SUMMARY
+Assignee: $JIRA_ASSIGNEE
+
+### Original Description
+$JIRA_DESCRIPTION
+
+## Subtasks
+$JIRA_SUBTASKS_CONTEXT
+
+## Technical cheatsheet
+$CHEATSHEET
+
+## Your Task
+$ENRICH_TEMPLATE
+
+$CLIPBOARD_OUTPUT_RULES
+
+Follow the "## Active Language" directive for all text.
+PROMPT_EOF
+)
+fi
 
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
+
+if [ "${OS_AGENT_DELIVERY:-clipboard}" != "cli" ]; then
+  _PROMPT_BYTES=$(wc -c < "$PROMPT_FILE" | tr -d ' ')
+  os_info "Clipboard prompt size: ${_PROMPT_BYTES} bytes (slim mode for $OS_ACTIVE_AGENT)"
+fi
 
 CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes/enriquecimientos/${TICKET_ID}"
 ARCHIVE_FILE="$CHANGES_DIR/${TICKET_ID}_enriched.md"
@@ -104,20 +165,43 @@ os_divider
 
 # ── Deliver and capture output ────────────────────────────────
 os_deliver_prompt_capture "$PROMPT_FILE" "$OUTPUT_FILE"
+
+# Prefer archive if a CLI agent wrote it directly
 if [ -s "$ARCHIVE_FILE" ]; then
-  # CLI agents with filesystem access write the archive file themselves
-  # per enrich-us.md; stdout may only carry a short confirmation.
   cp "$ARCHIVE_FILE" "$OUTPUT_FILE"
-else
-  cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
 fi
+
+# Sanitize: keep only the enriched markdown document
+SANITIZER=""
+if [ -f "$CLI_DIR/lib/sanitize_enrichment.py" ]; then
+  SANITIZER="$CLI_DIR/lib/sanitize_enrichment.py"
+elif [ -f "$HOME/.openspec/lib/sanitize_enrichment.py" ]; then
+  SANITIZER="$HOME/.openspec/lib/sanitize_enrichment.py"
+fi
+
+if [ -n "$SANITIZER" ] && [ -s "$OUTPUT_FILE" ]; then
+  os_step "Cleaning enrichment (remove prompt/chat noise)..."
+  TMP_CLEAN="${OUTPUT_FILE}.clean"
+  if py -X utf8 "$SANITIZER" "$OUTPUT_FILE" "$TMP_CLEAN"; then
+    mv "$TMP_CLEAN" "$OUTPUT_FILE"
+  else
+    rm -f "$TMP_CLEAN"
+    os_error "Enrichment output is not readable markdown."
+    os_info  "Paste ONLY the document that starts with:"
+    os_info  "  # Ticket enriquecido: $TICKET_ID — ..."
+    os_info  "into: $OUTPUT_FILE"
+    os_info  "Then re-run: os-enrich-apply $TICKET_ID"
+    exit 1
+  fi
+fi
+
+cp "$OUTPUT_FILE" "$ARCHIVE_FILE"
 os_success "Enriched content saved!"
 os_info "Working : .openspec-cli/.enriched-content.md"
 os_info "Archive : ai-specs/changes/enriquecimientos/${TICKET_ID}/${TICKET_ID}_enriched.md"
 os_divider
-os_info "Preview (first 10 lines):"
-head -10 "$OUTPUT_FILE"
+os_info "Preview (first 15 lines):"
+head -15 "$OUTPUT_FILE"
 os_divider
 os_info "Next step: os-enrich-apply $TICKET_ID"
-
 os_divider

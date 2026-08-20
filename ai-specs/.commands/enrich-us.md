@@ -1,24 +1,19 @@
-Please analyze and fix the Jira ticket: $ARGUMENTS.
+Please enrich the Jira ticket: $ARGUMENTS.
 
 Follow these steps:
 
-1. The ticket's details (type, status, summary, assignee, description) are already provided above under `## Jira Ticket: $ARGUMENTS` — use that content as the source of truth. Do not attempt to fetch it again via Jira MCP or any other tool; none is available in this context.
-2. You will act as a product expert with technical knowledge
-3. Understand the problem described in the ticket
-4. Decide whether or not the User Story is completely detailed according to product's best practices: Include a full description of the functionality, Vault hooks involved, `contracts_api` types, files to create or modify, acceptance criteria, unit/simulation tests, and non-functional requirements (sandbox restrictions, posting invariants, etc.)
-5. If the user story lacks the technical and specific detail necessary to allow the developer to be fully autonomous when completing it, provide an improved story that is clearer, more specific, and more concise in line with product best practices described in step 4. Use the technical context you will find in
-@documentation. Return it in markdown format.
-6. Do NOT update Jira yourself — do not call any Jira tool or MCP. Writing back to Jira is a separate, human-confirmed step handled by `os-enrich-apply` after you finish. Your only job here is to produce the markdown described below and save it to disk.
-7. Do NOT transition the ticket's status. Status transitions are handled separately via `os-transition`, not as part of this task.
-8. Look at the `## Subtasks` context block provided (fetched from Jira via `parent = <ticket-id>`). For each subtask listed there, apply the same detail bar as step 4: if its description lacks the technical specifics needed for autonomous implementation, write an enhanced version following step 5's criteria, scoped to that subtask. If a subtask is already sufficiently detailed, or if no subtasks exist, skip it — do not invent subtasks that aren't in the context block.
+1. The ticket details are already provided above under `## Jira Ticket: $ARGUMENTS` — use that as source of truth. Do not fetch Jira again.
+2. Act as a product expert with technical knowledge of Vault Smart Contracts (API 4.0).
+3. Improve the story so a developer can implement it without back-and-forth.
+4. Include only what is needed: clear behaviour, hooks, parameters/types, files, acceptance criteria, key tests, sandbox constraints, **and a Fibonacci story-points estimate**.
+5. If subtasks are listed under `## Subtasks`, enrich each one that lacks detail (including its own story points). Do not invent subtasks.
+6. Do NOT update Jira and do NOT transition status (`os-enrich-apply` / `os-transition` are separate steps).
 
 ## Language for section headers (mandatory)
 
-**All section headers in the saved file MUST be written in the Active Language**
-(see `## Active Language` in the prompt). Do **not** copy English headers when the
-active language is Spanish (or vice versa).
+**All section headers MUST use the Active Language.**
 
-Use exactly these headers when Active Language is Spanish (`es`):
+Spanish (`es`):
 
 | Sección | Encabezado obligatorio |
 |---|---|
@@ -30,9 +25,10 @@ Use exactly these headers when Active Language is Spanish (`es`):
 | Archivos | `## Archivos a crear o modificar` |
 | Pruebas | `## Casos de prueba unitarios` |
 | No funcionales | `## Requisitos no funcionales` |
+| Puntos de historia | `## Puntos de historia` |
 | Subtareas | `## Subtareas` |
 
-Use exactly these headers when Active Language is English (`en`):
+English (`en`):
 
 | Section | Required header |
 |---|---|
@@ -44,58 +40,88 @@ Use exactly these headers when Active Language is English (`en`):
 | Files | `## Files to Create or Modify` |
 | Tests | `## Unit Test Cases` |
 | NFR | `## Non-Functional Requirements` |
+| Story points | `## Story Points` |
 | Subtasks | `## Subtasks` |
 
-## Output
+## Output document structure
 
-Save the enriched content as a markdown file at `ai-specs/changes/enriquecimientos/$ARGUMENTS/$ARGUMENTS_enriched.md`
-using this structure:
+Return ONE markdown document with this shape (headers already localized above).
+**Story points are mandatory** — wrap the estimate in `<!-- STORY_POINTS:<N> -->` …
+`<!-- /STORY_POINTS -->` so `os-enrich-apply` can write the Jira Story Points field.
 
----
+```markdown
+# Ticket enriquecido: <TICKET-ID> — <Summary>
 
-### `# Enriched Ticket: <TICKET-ID> — <Summary>`
+## Descripción original
+<!-- jira-skip -->
+(breve copia limpia de la descripción original — archivo local only)
+<!-- /jira-skip -->
 
-### `## Original Description`
-(copy of the original ticket description)
+## Descripción mejorada
+2-4 párrafos cortos: comportamiento del producto, cuándo corre cada hook,
+y qué cambia en saldos / postings. Sin pegar el agent stack completo.
 
-### `## Enhanced Description`
-Full description of the functionality as refined. For Vault contracts include posting
-behaviour, schedules, and sandbox constraints.
+## Criterios de aceptación
+- [ ] Criterio de negocio observable
+- [ ] ...
+- [ ] os-vault-test pasa
+- [ ] os-vault-test --coverage pasa (>= 90%)
 
-### `## Acceptance Criteria`
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] os-vault-test passes
-- [ ] os-vault-test --coverage passes (>= 90%)
+## Campos, hooks y tipos
+- Hooks: ...
+- Parámetros: ...
+- Tipos contracts_api: ...
 
-### `## Fields, Hooks & Types`
-Vault hooks involved, `contracts_api` types, parameters, and posting/account shapes.
-
-### `## Files to Create or Modify`
-| File | Layer | Action |
+## Archivos a crear o modificar
+| Archivo | Capa | Acción |
 |---|---|---|
-| `contracts/<name>.py` | Contract | Create / Modify |
-| `tests/test_<name>.py` | Tests | Create / Modify |
+| `contracts/<name>.py` | Contract | Create |
+| `tests/test_<name>.py` | Tests | Create |
 
-### `## Unit Test Cases`
+## Casos de prueba unitarios
 - Happy path
-- Validation / rejection
-- Edge cases
-- Simulation / balances where relevant
+- Validación / rechazo
+- Edge cases (prepago, denominación, etc.)
 
-### `## Non-Functional Requirements`
-Sandbox restrictions, performance, validation constraints.
+## Requisitos no funcionales
+Sandbox Vault, Decimal, ZoneInfo, sin I/O.
 
-### `## Subtasks`
-Only include this section if the `## Subtasks` context block lists at least one
-subtask. For each subtask that needed refinement:
+## Puntos de historia
+<!-- STORY_POINTS:<N> -->
+Estimate using Fibonacci (1, 2, 3, 5, 8, 13). One short justification line.
+Example: **5** — posting + schedule + tests; no new vault accounts.
+<!-- /STORY_POINTS -->
 
-#### Subtask: `<SUBTASK-KEY>` — `<Summary>`
-Enhanced description, acceptance criteria, and files scoped to that subtask.
+## Subtareas
+(solo si existen en el contexto)
 
----
+<!-- SUBTASK:<SUBTASK-KEY> -->
+### Subtarea: <SUBTASK-KEY> — <Summary>
 
-## Final message format
+#### Descripción original
+<!-- jira-skip -->
+(copy)
+<!-- /jira-skip -->
 
-> Enriched content saved to `ai-specs/changes/enriquecimientos/<ticket-id>/<ticket-id>_enriched.md`.
-> Run `os-enrich-apply <TICKET-ID>` to upload it to Jira.
+#### Descripción mejorada
+Refined, technically detailed description.
+
+#### Criterios de aceptación
+- [ ] Criterion 1
+
+#### Puntos de historia
+<!-- STORY_POINTS:<N> -->
+Fibonacci estimate for this subtask only.
+<!-- /STORY_POINTS -->
+<!-- /SUBTASK:<SUBTASK-KEY> -->
+```
+
+## Style for Copilot / clipboard agents
+
+- Short paragraphs (1-3 sentences).
+- One bullet per idea.
+- No giant code blocks; at most one small example if essential.
+- No tables of unrelated stacks (Java/Spring, etc.).
+- No repeating the prompt or cheatsheet verbatim.
+- Readable in Jira after `os-enrich-apply`.
+- Always include `<!-- STORY_POINTS:<N> -->` on the parent ticket and on each refined subtask.
