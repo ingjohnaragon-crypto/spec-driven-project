@@ -316,7 +316,8 @@ display_name = "Product Name"
 summary      = "One-line summary"
 description  = "Full description"
 tside        = Tside.LIABILITY
-supported_denominations = ["GBP"]
+SUPPORTED_DENOMINATIONS = ["GBP", "USD", "EUR", "COP"]
+supported_denominations = SUPPORTED_DENOMINATIONS
 
 DEFAULT_ADDRESS = "DEFAULT"
 DEFAULT_ASSET   = "COMMERCIAL_BANK_MONEY"
@@ -332,7 +333,7 @@ parameters = [
     ),
     Parameter(
         name="denomination",
-        shape=DenominationShape(),
+        shape=DenominationShape(permitted_denominations=SUPPORTED_DENOMINATIONS),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
         default_value="GBP",

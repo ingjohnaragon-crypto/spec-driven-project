@@ -16,6 +16,8 @@ OS_CLI_ROOT="${SCRIPT_DIR}/../.."
 # ── Load env and config ───────────────────────────────────────
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
+os_load_config
+os_load_env
 
 CONTRACT_FILE="${1:-}"
 START_TS="${2:-}"

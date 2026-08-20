@@ -41,7 +41,7 @@ from contracts_api import (
 from decimal import Decimal, ROUND_HALF_UP
 
 api          = "4.0.0"
-version      = "1.0.0"
+version      = "1.1.0"
 display_name = "Fixed-Term Deposit"
 summary      = "Fixed-term deposit with daily interest accrual and maturity disbursement"
 description  = (
@@ -50,7 +50,8 @@ description  = (
     "disbursed automatically on the maturity date together with the principal."
 )
 tside                   = Tside.LIABILITY
-supported_denominations = ["GBP"]
+SUPPORTED_DENOMINATIONS = ["GBP", "USD", "EUR", "COP"]
+supported_denominations = SUPPORTED_DENOMINATIONS
 
 DEFAULT_ADDRESS  = "DEFAULT"
 DEFAULT_ASSET    = "COMMERCIAL_BANK_MONEY"
@@ -62,10 +63,10 @@ MATURITY_EVENT   = "MATURITY_EVENT"
 parameters = [
     Parameter(
         name="denomination",
-        shape=DenominationShape(),
+        shape=DenominationShape(permitted_denominations=SUPPORTED_DENOMINATIONS),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
-        description="Account denomination.",
+        description="Account denomination. One currency per account.",
         default_value="GBP",
     ),
     Parameter(

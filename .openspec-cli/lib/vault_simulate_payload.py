@@ -14,6 +14,14 @@ param_vals    = json.loads(sys.argv[4]) if len(sys.argv) > 4 else {}
 with open(contract_file, encoding="utf-8") as f:
     code = f.read()
 
+denomination = str(
+    param_vals.get("denomination")
+    or os.environ.get("VAULT_DEFAULT_DENOMINATION")
+    or "GBP"
+)
+if "denomination" not in param_vals:
+    param_vals["denomination"] = denomination
+
 # Build param vals array from dict
 smart_contract_param_vals = [
     {"name": k, "value": str(v)}
@@ -35,7 +43,7 @@ payload = {
             "timestamp": start_ts,
             "transaction": {
                 "amount": "100",
-                "denomination": "GBP",
+                "denomination": denomination,
                 "instruction_details": {
                     "description": "OpenSpec simulation test deposit"
                 }

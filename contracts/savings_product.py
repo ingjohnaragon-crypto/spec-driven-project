@@ -30,7 +30,7 @@ from contracts_api import (
 from decimal import Decimal, ROUND_HALF_UP
 
 api          = "4.0.0"
-version      = "1.0.0"
+version      = "1.1.0"
 display_name = "Basic Savings Account"
 summary      = "Savings account with monthly interest accrual"
 description  = (
@@ -40,7 +40,8 @@ description  = (
 )
 
 tside                    = Tside.LIABILITY
-supported_denominations  = ["GBP"]
+SUPPORTED_DENOMINATIONS  = ["GBP", "USD", "EUR", "COP"]
+supported_denominations  = SUPPORTED_DENOMINATIONS
 
 DEFAULT_ADDRESS  = "DEFAULT"
 DEFAULT_ASSET    = "COMMERCIAL_BANK_MONEY"
@@ -63,10 +64,10 @@ parameters = [
     ),
     Parameter(
         name="denomination",
-        shape=DenominationShape(),
+        shape=DenominationShape(permitted_denominations=SUPPORTED_DENOMINATIONS),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
-        description="Account denomination.",
+        description="Account denomination. One currency per account.",
         default_value="GBP",
     ),
 ]
@@ -109,16 +110,16 @@ def _calculate_interest(balance: Decimal, daily_rate: Decimal, days: int) -> Dec
     )
 
 
-def _posting_net_effect(posting_instructions) -> Decimal:
+def _posting_net_effect(posting_instructions, denomination: str) -> Decimal:
     """
-    Sum the net COMMITTED effect of all postings in a batch.
+    Sum the net COMMITTED effect of postings in the account denomination.
     In API 4.0 posting.balances() returns {BalanceCoordinate: Balance}.
     Phase is on the key (BalanceCoordinate), not on the Balance value.
     """
     total = Decimal("0")
     for posting in posting_instructions:
         for coord, balance in posting.balances().items():
-            if coord.phase == Phase.COMMITTED:
+            if coord.phase == Phase.COMMITTED and coord.denomination == denomination:
                 total += balance.net
     return total
 
@@ -143,7 +144,20 @@ def pre_posting_hook(
     denomination    = vault.get_parameter_timeseries(name="denomination").latest()
     balances        = vault.get_balances_observation(fetcher_id="live_balances").balances
     current_balance = _get_committed_balance(balances, denomination)
-    posting_effect  = _posting_net_effect(hook_arguments.posting_instructions)
+
+    for posting in hook_arguments.posting_instructions:
+        if posting.denomination != denomination:
+            return PrePostingHookResult(
+                rejection=Rejection(
+                    message=(
+                        f"Posting denomination {posting.denomination} does not match "
+                        f"account denomination {denomination}."
+                    ),
+                    reason_code=RejectionReason.WRONG_DENOMINATION,
+                )
+            )
+
+    posting_effect = _posting_net_effect(hook_arguments.posting_instructions, denomination)
 
     if current_balance + posting_effect < Decimal("0"):
         return PrePostingHookResult(
