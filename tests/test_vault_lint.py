@@ -1,6 +1,7 @@
 """Tests for vault_lint.py — Vault Python sandbox restriction linter."""
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from vault_lint import Violation, lint_directory, lint_file, main
@@ -285,3 +286,115 @@ def test_main_should_lint_directory_when_target_is_dir(tmp_path: Path) -> None:
 def test_main_should_return_1_when_directory_has_no_py_files(tmp_path: Path) -> None:
     result = main([str(tmp_path)])
     assert result == 1
+
+
+# ── Color / Windows helpers ───────────────────────────────────
+
+
+def test_use_color_respects_no_color(monkeypatch) -> None:
+    from vault_lint import _use_color
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    assert _use_color() is False
+
+
+def test_use_color_respects_force_color(monkeypatch) -> None:
+    from vault_lint import _c, _GREEN, _use_color
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    assert _use_color() is True
+    assert _GREEN in _c(_GREEN, "ok")
+
+
+def test_use_color_on_non_tty(monkeypatch) -> None:
+    from vault_lint import _use_color
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    assert _use_color() is False
+
+
+def test_enable_windows_vt_noop_on_non_windows(monkeypatch) -> None:
+    from vault_lint import _enable_windows_vt
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert _enable_windows_vt() is True
+
+
+def test_enable_windows_vt_handles_console_mode_failure(monkeypatch) -> None:
+    from vault_lint import _enable_windows_vt
+    import types
+
+    class _Kernel:
+        def GetStdHandle(self, _n):  # noqa: N802
+            return 1
+
+        def GetConsoleMode(self, _h, _mode):  # noqa: N802
+            return 0
+
+    fake = types.ModuleType("ctypes")
+    fake.windll = types.SimpleNamespace(kernel32=_Kernel())
+    fake.c_uint32 = lambda: types.SimpleNamespace(value=0)
+    fake.byref = lambda x: x
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "ctypes", fake)
+    assert _enable_windows_vt() is False
+
+
+def test_enable_windows_vt_success(monkeypatch) -> None:
+    from vault_lint import _enable_windows_vt
+    import types
+
+    class _Kernel:
+        def GetStdHandle(self, _n):  # noqa: N802
+            return 1
+
+        def GetConsoleMode(self, _h, mode):  # noqa: N802
+            mode.value = 0
+            return 1
+
+        def SetConsoleMode(self, _h, _mode):  # noqa: N802
+            return 1
+
+    fake = types.ModuleType("ctypes")
+    fake.windll = types.SimpleNamespace(kernel32=_Kernel())
+    fake.c_uint32 = lambda: types.SimpleNamespace(value=0)
+    fake.byref = lambda x: x
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "ctypes", fake)
+    assert _enable_windows_vt() is True
+
+
+def test_enable_windows_vt_handles_exceptions(monkeypatch) -> None:
+    from vault_lint import _enable_windows_vt
+    import types
+
+    fake = types.ModuleType("ctypes")
+    fake.windll = types.SimpleNamespace(kernel32=None)
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setitem(sys.modules, "ctypes", fake)
+    assert _enable_windows_vt() is False
+
+
+def test_configure_stdout_swallows_errors(monkeypatch) -> None:
+    from vault_lint import _configure_stdout
+
+    def _boom(*_a, **_k):
+        raise OSError("nope")
+
+    monkeypatch.setattr(sys.stdout, "reconfigure", _boom, raising=False)
+    monkeypatch.setattr(sys.stderr, "reconfigure", _boom, raising=False)
+    _configure_stdout()  # must not raise
+
+
+def test_use_color_on_linux_tty(monkeypatch) -> None:
+    from vault_lint import _use_color
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    assert _use_color() is True
