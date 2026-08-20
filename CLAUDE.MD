@@ -30,7 +30,7 @@ open-spec/
 │   │   ├── python-fastapi.md
 │   │   └── ...
 │   ├── specs/stacks/
-│   │   └── vault-smart-contracts-standards.mdc
+│   │   └── stacks/vault-smart-contracts-standards.mdc
 │   ├── .commands/                    # Plantillas de prompt
 │   └── changes/                      # Planes generados por ticket
 ├── contracts/

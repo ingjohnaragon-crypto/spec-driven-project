@@ -30,3 +30,10 @@ os_error()   { printf "${COLOR_ERROR}✖  %s${RESET}\n" "$*" >&2; }
 os_step()    { printf "${COLOR_STEP}▶  %s${RESET}\n" "$*"; }
 os_label()   { printf "${COLOR_LABEL}%s${RESET}\n" "$*"; }
 os_divider() { printf "${COLOR_INFO}%s${RESET}\n" "────────────────────────────────────────────"; }
+
+# Legacy aliases used by os-vault-* commands
+os_print_separator() { os_divider; }
+os_print_header()    { os_label "$@"; }
+os_print_info()      { os_info "$@"; }
+os_print_error()     { os_error "$@"; }
+os_print_success()   { os_success "$@"; }
