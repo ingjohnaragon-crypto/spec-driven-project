@@ -61,16 +61,18 @@ def make_vault(balance: Decimal = Decimal("1000"),
 
 
 def make_posting_instruction(amount: Decimal,
-                              credit: bool = False) -> MagicMock:
+                              credit: bool = False,
+                              denomination: str = DEFAULT_DENOM) -> MagicMock:
     """
     API 4.0: posting.balances() returns {BalanceCoordinate: Balance}.
     Phase is on the KEY (BalanceCoordinate), not on the Balance value.
     """
     pi  = MagicMock()
+    pi.denomination = denomination
     key = BalanceCoordinate(
         account_address=DEFAULT_ADDRESS,
         asset=DEFAULT_ASSET,
-        denomination=DEFAULT_DENOM,
+        denomination=denomination,
         phase=Phase.COMMITTED,
     )
     net        = amount if credit else -amount
@@ -166,6 +168,25 @@ class TestPrePostingHook:
         assert "50"  in result.rejection.message
         assert "200" in result.rejection.message
 
+    def test_allows_usd_deposit_on_usd_account(self):
+        vault   = make_vault(balance=Decimal("500"), denomination="USD")
+        posting = make_posting_instruction(Decimal("100"), credit=True, denomination="USD")
+        result  = contract.pre_posting_hook(vault, self._make_args(posting))
+        assert result.rejection is None
+
+    def test_allows_cop_deposit_on_cop_account(self):
+        vault   = make_vault(balance=Decimal("100000"), denomination="COP")
+        posting = make_posting_instruction(Decimal("50000"), credit=True, denomination="COP")
+        result  = contract.pre_posting_hook(vault, self._make_args(posting))
+        assert result.rejection is None
+
+    def test_rejects_wrong_denomination(self):
+        vault   = make_vault(balance=Decimal("500"), denomination="GBP")
+        posting = make_posting_instruction(Decimal("100"), credit=True, denomination="USD")
+        result  = contract.pre_posting_hook(vault, self._make_args(posting))
+        assert result.rejection is not None
+        assert result.rejection.reason_code == RejectionReason.WRONG_DENOMINATION
+
 
 # ══════════════════════════════════════════════════════════════
 # scheduled_event_hook
@@ -195,6 +216,13 @@ class TestScheduledEventHook:
             if p.credit and p.account_address == "ACCRUED_INTEREST"
         )
         assert credit_posting.amount == Decimal("38.36")
+
+    def test_interest_posting_uses_account_denomination(self):
+        vault  = make_vault(balance=Decimal("10000"), denomination="EUR")
+        result = contract.scheduled_event_hook(vault, self._make_args())
+        pis = result.posting_instructions_directives[0].posting_instructions
+        for posting in pis[0].postings:
+            assert posting.denomination == "EUR"
 
     def test_no_postings_on_zero_balance(self):
         vault  = make_vault(balance=Decimal("0"))
@@ -241,10 +269,13 @@ class TestHelpers:
 
     def test_posting_net_effect_debit(self):
         posting = make_posting_instruction(Decimal("100"), credit=False)
-        effect  = contract._posting_net_effect([posting])
+        effect  = contract._posting_net_effect([posting], DEFAULT_DENOM)
         assert effect == Decimal("-100")
 
     def test_posting_net_effect_credit(self):
         posting = make_posting_instruction(Decimal("100"), credit=True)
-        effect  = contract._posting_net_effect([posting])
+        effect  = contract._posting_net_effect([posting], DEFAULT_DENOM)
         assert effect == Decimal("100")
+
+    def test_supported_denominations_include_common_currencies(self):
+        assert contract.supported_denominations == ["GBP", "USD", "EUR", "COP"]

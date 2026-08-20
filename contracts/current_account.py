@@ -21,7 +21,7 @@ from contracts_api import (
 from decimal import Decimal
 
 api = "4.0.0"
-version = "1.0.0"
+version = "1.1.0"
 display_name = "Current Account with Overdraft"
 summary = "Current account product with authorized overdraft limit"
 description = (
@@ -29,7 +29,7 @@ description = (
     "and rejects debit postings that exceed the approved overdraft capacity."
 )
 tside = Tside.LIABILITY
-supported_denominations = ["GBP"]
+supported_denominations = ["GBP", "USD", "EUR", "COP"]
 
 DEFAULT_ADDRESS = "DEFAULT"
 DEFAULT_ASSET = "COMMERCIAL_BANK_MONEY"
@@ -37,10 +37,10 @@ DEFAULT_ASSET = "COMMERCIAL_BANK_MONEY"
 parameters = [
     Parameter(
         name="denomination",
-        shape=DenominationShape(),
+        shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
-        description="Account currency denomination.",
+        description="Account currency denomination. One currency per account.",
         default_value="GBP",
     ),
     Parameter(
@@ -73,11 +73,11 @@ def _get_committed_balance(
     return balances[key].net
 
 
-def _posting_net_effect(posting_instructions) -> Decimal:
+def _posting_net_effect(posting_instructions, denomination: str) -> Decimal:
     total = Decimal("0")
     for posting in posting_instructions:
         for coord, balance in posting.balances().items():
-            if coord.phase == Phase.COMMITTED:
+            if coord.phase == Phase.COMMITTED and coord.denomination == denomination:
                 total += balance.net
     return total
 
@@ -114,7 +114,20 @@ def pre_posting_hook(
     overdraft_limit = vault.get_parameter_timeseries(name="overdraft_limit").latest()
     balances = vault.get_balances_observation(fetcher_id="live_balances").balances
     current_balance = _get_committed_balance(balances, denomination)
-    posting_effect = _posting_net_effect(hook_arguments.posting_instructions)
+
+    for posting in hook_arguments.posting_instructions:
+        if posting.denomination != denomination:
+            return PrePostingHookResult(
+                rejection=Rejection(
+                    message=(
+                        f"Posting denomination {posting.denomination} does not match "
+                        f"account denomination {denomination}."
+                    ),
+                    reason_code=RejectionReason.WRONG_DENOMINATION,
+                )
+            )
+
+    posting_effect = _posting_net_effect(hook_arguments.posting_instructions, denomination)
     available_balance = _calculate_available_balance(current_balance, overdraft_limit)
     resulting_balance = current_balance + posting_effect
     overdraft_used = _calculate_overdraft_usage(resulting_balance)
