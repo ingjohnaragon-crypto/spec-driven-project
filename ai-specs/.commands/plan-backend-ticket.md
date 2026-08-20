@@ -1,5 +1,8 @@
 # plan-backend-ticket
 
+> **Note:** When active stack is `vault-smart-contracts`, OpenSpec uses
+> `plan-vault-contract.md` instead of this template.
+
 Ticket ID: $ARGUMENTS
 
 ## Goal

@@ -136,11 +136,12 @@ contracts_sdk/               # SDK directory (git-ignored binary)
 
 ```bash
 os-stack vault-smart-contracts   # activate stack
-os-vault-test                    # run tests with SDK
-os-vault-test --coverage         # with coverage ≥ 90%
+os-vault-lint                    # sandbox lint (runs before tests)
+os-vault-test                    # lint + run tests with SDK
+os-vault-test --coverage         # lint + tests with coverage ≥ 90%
 os-vault-simulate contracts/<product>.py <start> <end> '<params_json>'
 os-vault-deploy contracts/<product>.py <product_id> "<display_name>"
-os-vault-account <product_version_id> <customer_id>
+os-vault-account <product_version_id> <customer_id> [denomination]
 os-vault-balances <account_id>
 ```
 
@@ -223,4 +224,4 @@ Posting(credit=True, amount=penalty, account_address=DEFAULT_ADDRESS, ...)
 - `OptionalValue` in test fixtures must wrap `datetime`, not `date` (see SDK behaviours above)
 - Assert **both** legs of a two-CI operation (e.g. net payout AND penalty forfeiture)
 - Coverage threshold: **≥ 90%**
-- Run: `py -m pytest tests/ -v --cov=contracts --cov-report=term-missing`
+- Run: `os-vault-test --coverage`
