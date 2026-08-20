@@ -160,3 +160,86 @@ def test_pre_posting_code_rejects_overpay():
     else:
         rej = getattr(result, 'rejection', None)
         assert rej is not None
+
+
+def test_activation_hook_creates_disbursement():
+    module = importlib.import_module('contracts.personal_loan')
+    hook_args = {'principal': '5000.00', 'denomination': 'GBP'}
+    result = module.activation_hook(hook_args)
+    assert result is not None
+    if isinstance(result, dict):
+        postings = result.get('postings')
+    else:
+        postings = getattr(result, 'postings', None)
+    assert postings is not None
+    # Expect a single disbursement posting with the principal amount
+    assert len(postings) == 1
+    p = postings[0]
+    amount = Decimal(p['amount']) if isinstance(p, dict) else Decimal(getattr(p, 'amount', '0'))
+    assert amount == Decimal('5000.00')
+    t = p.get('type') if isinstance(p, dict) else getattr(p, 'type', None)
+    assert t == 'disbursement'
+
+
+def test_zero_rate_schedule():
+    module = importlib.import_module('contracts.personal_loan')
+    principal = Decimal('1000.00')
+    annual_rate = Decimal('0')
+    term = 10
+    schedule = module._calculate_schedule(principal, annual_rate, term, 'GBP')
+    assert len(schedule) == term
+    payments = [entry['payment'] for entry in schedule]
+    # all payments equal principal/term
+    expected = (principal / Decimal(term)).quantize(Decimal('0.01'))
+    for p in payments:
+        assert p == expected
+    total_principal = sum(entry['principal_due'] for entry in schedule)
+    assert total_principal == principal
+
+
+def test_pre_posting_code_fixed_penalty():
+    module = importlib.import_module('contracts.personal_loan')
+    hook_args = {
+        'prepayment': {'amount': '100.00', 'denomination': 'GBP'},
+        'outstanding_principal': '500.00',
+        'prepayment_penalty': {'type': 'fixed', 'value': '5.00'},
+    }
+    result = module.pre_posting_code(hook_args)
+    assert result is not None
+    # Extract instruction/postings
+    if isinstance(result, dict) and result.get('instruction'):
+        instr = result['instruction']
+    elif isinstance(result, dict) and 'postings' in result:
+        instr = result
+    else:
+        instr = result
+    postings = instr.get('postings') if isinstance(instr, dict) else getattr(instr, 'postings', None)
+    assert postings is not None
+    # Find penalty posting
+    found_penalty = False
+    for p in postings:
+        ptype = p.get('type') if isinstance(p, dict) else getattr(p, 'type', None)
+        if ptype == 'penalty':
+            amt = Decimal(p['amount']) if isinstance(p, dict) else Decimal(getattr(p, 'amount', '0'))
+            assert amt == Decimal('5.00')
+            found_penalty = True
+    assert found_penalty
+
+
+def test_scheduled_event_hook_invalid_period_noop():
+    module = importlib.import_module('contracts.personal_loan')
+    hook_args = {'principal': '1000.00', 'interest_rate': '5', 'term_months': 12, 'period': 999}
+    result = module.scheduled_event_hook(hook_args)
+    assert result is None
+
+
+def test_pre_posting_code_no_prepayment_returns_none():
+    module = importlib.import_module('contracts.personal_loan')
+    hook_args = {}
+    result = module.pre_posting_code(hook_args)
+    assert result is None
+
+
+def test_post_posting_code_noop():
+    module = importlib.import_module('contracts.personal_loan')
+    assert module.post_posting_code({}) is None
