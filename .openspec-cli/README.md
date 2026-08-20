@@ -61,7 +61,7 @@ os-enrich-apply KAN-6                        # uploads to Jira automatically
 # 4. Generate implementation plan
 os-plan KAN-6
 # Prompt is delivered automatically to your active agent
-# → AI generates ai-specs/changes/KAN-6_backend.md
+# → AI generates ai-specs/changes/planes/KAN-6/KAN-6_backend.md
 
 # 5. Implement
 os-develop KAN-6
@@ -105,6 +105,17 @@ os-stack node-express     # switch to Node.js/Express
 os-stack go-gin           # switch to Go/Gin
 os-stack frontend-react   # switch to React + Vite
 os-stack frontend-angular # switch to Angular
+os-stack vault-smart-contracts
+```
+
+### `os-language [--list | <language-code>]`
+
+Switches the output language for plans, enrichments, reviews, commits and PRs.
+
+```bash
+os-language --list
+os-language en
+os-language es
 ```
 
 ### `os-plan <TICKET-ID>`
@@ -229,13 +240,17 @@ One command changes everything — agent file, standards, and tooling commands:
 │   ├── colors.sh                Terminal color and print helpers
 │   ├── config.sh                Reads and resolves openspec/config.yaml
 │   ├── agent.sh                 Resolves active AI agent and delivers prompts
+│   │                            (os_deliver_prompt / autonomous / capture)
+│   ├── language.sh              Resolves active output language
 │   ├── jira.sh                  Jira Cloud REST API v3 helpers
 │   ├── parse_config.py          Python YAML parser for stack fields
 │   ├── parse_agent.py           Python YAML parser for agent fields
+│   ├── parse_language.py        Python YAML parser for language fields
 │   └── parse_stack.py           Python parser for active stack name
 └── commands/
     ├── os-agent                 Switch active AI agent
     ├── os-stack                 Switch active tech stack
+    ├── os-language              Switch active output language
     ├── os-plan                  Generate implementation plan prompt
     ├── os-develop               Create branch + implementation prompt
     ├── os-enrich                Generate ticket enrichment prompt

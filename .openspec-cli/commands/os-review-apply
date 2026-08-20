@@ -26,39 +26,29 @@ fi
 
 os_load_config
 
-# ── Resolve review file ──────────────────────────────────────
+# ── Resolve review file (temp working file only) ──────────────
 REVIEW_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
-
-# Derive ticket ID from PR branch name for archive lookup
-PR_BRANCH_NAME=$(gh pr view "$PR_NUMBER" --json headRefName -q .headRefName 2>/dev/null || echo "")
-PR_TICKET_ID=$(echo "$PR_BRANCH_NAME" | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
-ARCHIVE_FILE=""
-[ -n "$PR_TICKET_ID" ] && ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/${PR_TICKET_ID}_review.md"
-[ -z "$ARCHIVE_FILE" ] && ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/pr-${PR_NUMBER}_review.md"
 
 if [ -n "$CONTENT_FILE" ] && [ -f "$CONTENT_FILE" ]; then
   SOURCE_FILE="$CONTENT_FILE"
-elif [ -n "$ARCHIVE_FILE" ] && [ -f "$ARCHIVE_FILE" ]; then
-  SOURCE_FILE="$ARCHIVE_FILE"
 elif [ -f "$REVIEW_FILE" ]; then
   SOURCE_FILE="$REVIEW_FILE"
 else
   os_error "No review file found."
-  os_info  "Expected at: ai-specs/changes/${PR_TICKET_ID}_review.md"
-  os_info  "Fallback  : .openspec-cli/.review-output.md"
-  os_info  "Or run   : os-review $PR_NUMBER"
+  os_info  "Expected: .openspec-cli/.review-output.md"
+  os_info  "Or run : os-review $PR_NUMBER"
   exit 1
 fi
 
 os_step "Cleaning and reading review from: $SOURCE_FILE"
 # Remove vscode-file:// links that break markdown
-py -X utf8 -c "
+py -X utf8 -c '
 import re, sys
 content = open(sys.argv[1], encoding="utf-8").read()
 # Replace vscode links with just the filename
-content = re.sub(r"\[([^\]]+)\]\(vscode-file://[^)]+\)", r"\", content)
+content = re.sub(r"\[([^\]]+)\]\(vscode-file://[^)]+\)", r"\1", content)
 open(sys.argv[1], "w", encoding="utf-8").write(content)
-" "$SOURCE_FILE"
+' "$SOURCE_FILE"
 CHAR_COUNT=$(wc -c < "$SOURCE_FILE")
 os_info "Review size: $CHAR_COUNT characters"
 
@@ -121,7 +111,7 @@ case "$VERDICT" in
     ;;
 esac
 
-# ── Archive ──────────────────────────────────────────────────
+# ── Mark working file as applied (keep under .openspec-cli only) ──
 PR_URL=$(gh pr view "$PR_NUMBER" --json url -q .url 2>/dev/null || echo "")
 
 os_divider
@@ -130,4 +120,5 @@ os_success "Review published to PR #$PR_NUMBER!"
 os_divider
 
 mv "$SOURCE_FILE" "${SOURCE_FILE}.applied" 2>/dev/null || true
-os_info "Review archived to: ${SOURCE_FILE}.applied"
+os_info "Working file marked applied: ${SOURCE_FILE}.applied"
+os_info "Canonical archive: the GitHub PR comment/review"

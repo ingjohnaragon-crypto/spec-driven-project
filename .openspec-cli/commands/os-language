@@ -1,0 +1,137 @@
+#!/bin/sh
+# os-language [--list | <language-code>]
+# ─────────────────────────────────────────────────────────────
+# Lists available output languages or switches the active language
+# in openspec/config.yaml without opening an editor. The active
+# language applies to everything the framework generates: code,
+# comments, docs, Jira content, commit messages, PR titles/bodies.
+# ─────────────────────────────────────────────────────────────
+set -e
+
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+. "$CLI_DIR/lib/colors.sh"
+. "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/language.sh"
+
+os_load_config
+os_load_language
+
+ARG="${1:-}"
+
+# ── List available languages ─────────────────────────────────
+if [ "$ARG" = "--list" ] || [ "$ARG" = "-l" ] || [ -z "$ARG" ]; then
+  os_divider
+  os_label "  Available languages (active: $OS_ACTIVE_LANGUAGE)"
+  os_divider
+
+  py -X utf8 - "$OS_CONFIG" "$OS_ACTIVE_LANGUAGE" << 'PYEOF'
+import sys, re
+
+config_path = sys.argv[1]
+active = sys.argv[2]
+
+with open(config_path, encoding="utf-8") as f:
+    lines = f.readlines()
+
+in_languages = False
+current = None
+fields = {}
+
+for line in lines:
+    s = line.rstrip()
+    if re.match(r'^languages:\s*$', s):
+        in_languages = True
+        continue
+    if in_languages:
+        if s and not s.startswith(' '):
+            if current:
+                marker = " <-- active" if current == active else ""
+                label = fields.get('label', current)
+                print(f"  {current}{marker}")
+                print(f"    {label}")
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', s)
+        if m:
+            if current:
+                marker = " <-- active" if current == active else ""
+                label = fields.get('label', current)
+                print(f"  {current}{marker}")
+                print(f"    {label}")
+            current = m.group(1)
+            fields = {}
+        elif current:
+            fm = re.match(r'^    ([a-zA-Z0-9_]+):\s*(.+)$', s)
+            if fm:
+                fields[fm.group(1)] = fm.group(2).strip().strip('"').strip("'")
+PYEOF
+
+  os_divider
+  os_info "Usage: os-language <language-code>"
+  os_info "       os-language --list"
+  os_divider
+
+  if [ -z "$ARG" ] || [ "$ARG" = "--list" ] || [ "$ARG" = "-l" ]; then
+    exit 0
+  fi
+fi
+
+# ── Switch active language ───────────────────────────────────
+NEW_LANGUAGE="$ARG"
+
+# Validate language exists
+VALID=$(py -X utf8 - "$OS_CONFIG" "$NEW_LANGUAGE" << 'PYEOF'
+import sys, re
+
+config_path, target = sys.argv[1], sys.argv[2]
+with open(config_path, encoding="utf-8") as f:
+    lines = f.readlines()
+
+in_languages = False
+for line in lines:
+    s = line.rstrip()
+    if re.match(r'^languages:\s*$', s):
+        in_languages = True
+        continue
+    if in_languages:
+        if s and not s.startswith(' '):
+            break
+        m = re.match(r'^  ([a-zA-Z0-9_-]+):\s*$', s)
+        if m and m.group(1) == target:
+            print("valid")
+            sys.exit(0)
+
+print("invalid")
+PYEOF
+)
+
+if [ "$VALID" != "valid" ]; then
+  os_error "Language '$NEW_LANGUAGE' not found in openspec/config.yaml"
+  os_info  "Run 'os-language --list' to see available languages"
+  exit 1
+fi
+
+# Update config.yaml — replace "language: <current>" with "language: <new>"
+py -X utf8 - "$OS_CONFIG" "$NEW_LANGUAGE" << 'PYEOF'
+import sys, re
+
+config_path, new_language = sys.argv[1], sys.argv[2]
+
+with open(config_path, encoding="utf-8") as f:
+    content = f.read()
+
+updated = re.sub(
+    r'^(language:\s*)["\']?[a-zA-Z0-9_-]+["\']?',
+    f'\\g<1>{new_language}',
+    content,
+    count=1,
+    flags=re.MULTILINE
+)
+
+with open(config_path, 'w', newline='\n') as f:
+    f.write(updated)
+
+print(f"switched to: {new_language}")
+PYEOF
+
+os_success "Active language switched to: $NEW_LANGUAGE"
+os_info    "Run 'os-language --list' to confirm, or 'os-plan <TICKET-ID>' to use it."

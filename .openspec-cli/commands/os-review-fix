@@ -24,6 +24,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/agent.sh"
+. "$CLI_DIR/lib/language.sh"
 
 if [ -z "$PR_NUMBER" ]; then
   os_error "Usage: os-review-fix <PR-NUMBER> [--no-commit]"
@@ -33,6 +34,7 @@ fi
 os_load_config
 os_load_env
 os_load_agent
+os_load_language
 cd "$OS_REPO_ROOT"
 
 REVIEW_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
@@ -141,6 +143,10 @@ FIX_PROMPT="You are acting as the backend-developer agent for an openspec projec
 A code review has been completed for PR #$PR_NUMBER and changes are requested.
 Your task is to fix ALL the issues identified in the review below.
 
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
+
 ## Active Stack
 Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Test     : $OS_TEST_CMD
@@ -167,6 +173,7 @@ $FULL_REVIEW
    - All existing tests still pass: $OS_TEST_CMD
    - Coverage remains >= 90%: $OS_COVERAGE_CMD
    - No new linting errors: $OS_LINT_CMD
+   - os-vault-test passes when the change touches Vault contracts
 5. Keep the same branch — do not create a new one.
 
 Fix the issues now. Start with CRITICAL, then MAJOR, then MINOR.
@@ -183,17 +190,10 @@ printf '%s' "$FIX_PROMPT" > "$FIX_PROMPT_FILE"
 
 # ── Deliver fix prompt to agent ───────────────────────────────
 os_divider
+os_deliver_prompt_autonomous "$FIX_PROMPT_FILE" "Press Enter when done..."
+
 if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
-  os_step "Sending fix prompt to $OS_AGENT_LABEL..."
-  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$FIX_PROMPT_FILE"
   os_success "Agent completed fixes."
-else
-  printf '%s' "$FIX_PROMPT" | clip 2>/dev/null || true
-  os_success "Fix prompt copied to clipboard!"
-  os_info "1. Paste in $OS_AGENT_LABEL"
-  os_info "2. Let it fix all issues"
-  os_info "3. Press Enter when done..."
-  read -r _dummy
 fi
 
 # ── Run tests ─────────────────────────────────────────────────
@@ -223,36 +223,45 @@ if [ "$AUTO_COMMIT" = "true" ]; then
     # Stage new files excluding secrets
     for f in $(git status --porcelain | grep '^??' | awk '{print $2}'); do
       case "$f" in
-        .env|*.env|*.secret) os_warn "Skipping: $f" ;;
+        .env|*.env|*.secret|openspec/config.yaml) os_warn "Skipping: $f" ;;
         *) git add "$f" ;;
       esac
     done
 
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    if [ -n "$TICKET_ID" ]; then
-      MSG="fix(review): address PR #$PR_NUMBER feedback for $TICKET_ID"
+    if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+      if [ -n "$TICKET_ID" ]; then
+        MSG="fix(review): atiende comentarios del PR #$PR_NUMBER para $TICKET_ID"
+      else
+        MSG="fix(review): atiende comentarios del PR #$PR_NUMBER"
+      fi
+      COMMIT_BODY="- Corrige los problemas identificados en la revisión de código
+- Todos los tests pasan tras la corrección
+- Stack: $OS_ACTIVE_STACK"
     else
-      MSG="fix(review): address PR #$PR_NUMBER feedback"
-    fi
-
-    git commit -m "$MSG" -m "- Fixes issues identified in code review
+      if [ -n "$TICKET_ID" ]; then
+        MSG="fix(review): address PR #$PR_NUMBER feedback for $TICKET_ID"
+      else
+        MSG="fix(review): address PR #$PR_NUMBER feedback"
+      fi
+      COMMIT_BODY="- Fixes issues identified in code review
 - All tests pass post-fix
 - Stack: $OS_ACTIVE_STACK"
+    fi
+
+    git commit -m "$MSG" -m "$COMMIT_BODY"
 
     git push origin "$CURRENT_BRANCH"
     os_success "Fixes committed and pushed: $MSG"
   fi
 
-  # ── Save fix report ─────────────────────────────────────────
-  CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
-  mkdir -p "$CHANGES_DIR"
-  if [ -n "$TICKET_ID" ]; then
-    FIX_REPORT_FILE="$CHANGES_DIR/${TICKET_ID}_fix.md"
-    cat > "$FIX_REPORT_FILE" << FIX_EOF
+  # ── Save fix report (temp working file only) ───────────────
+  FIX_REPORT_FILE="$OS_REPO_ROOT/.openspec-cli/.fix-report.md"
+  cat > "$FIX_REPORT_FILE" << FIX_EOF
 # Review Fix Report: PR #$PR_NUMBER
 
 ## Original Verdict
-REQUEST CHANGES — see \`ai-specs/changes/${TICKET_ID}_review.md\`
+REQUEST CHANGES — see \`.openspec-cli/.review-output.md.applied\` or the GitHub PR review
 
 ## Issues Addressed
 Fixes applied to issues identified in the review.
@@ -265,40 +274,33 @@ See git diff for specific changes.
 ## Verdict After Fixes
 READY FOR RE-REVIEW
 FIX_EOF
-    os_info "Fix report: ai-specs/changes/${TICKET_ID}_fix.md"
-  fi
+  os_info "Fix report (temp): .openspec-cli/.fix-report.md"
 fi
 
 # ── Generate new review ───────────────────────────────────────
+if [ -f "$CLI_DIR/bin/os-review" ]; then
+  OS_REVIEW_CMD="$CLI_DIR/bin/os-review"
+  OS_REVIEW_APPLY_CMD="$CLI_DIR/bin/os-review-apply"
+else
+  OS_REVIEW_CMD="$CLI_DIR/commands/os-review"
+  OS_REVIEW_APPLY_CMD="$CLI_DIR/commands/os-review-apply"
+fi
+
+if [ ! -f "$OS_REVIEW_CMD" ]; then
+  os_error "os-review not found at $OS_REVIEW_CMD"
+  exit 1
+fi
+
 os_divider
 os_step "Generating new review of updated PR..."
-"$CLI_DIR/bin/os-review" "$PR_NUMBER"
+"$OS_REVIEW_CMD" "$PR_NUMBER"
 
 # ── Publish new review ────────────────────────────────────────
 os_divider
 os_step "Publishing updated review to GitHub..."
-"$CLI_DIR/bin/os-review-apply" "$PR_NUMBER"
+"$OS_REVIEW_APPLY_CMD" "$PR_NUMBER"
 
 os_divider
 os_success "Fix loop complete!"
 os_info "Check the PR: gh pr view $PR_NUMBER --web"
 os_divider
-
-# ─────────────────────────────────────────────────────────────
-# UPDATE os-review-apply to support --fix flag
-# Add these lines at the END of os-review-apply, before the
-# final os_divider, to enable: os-review-apply 9 --fix
-# ─────────────────────────────────────────────────────────────
-# AUTO_FIX section (add to os-review-apply):
-#
-# AUTO_FIX=false
-# for arg in "$@"; do
-#   case "$arg" in --fix) AUTO_FIX=true ;; esac
-# done
-#
-# After publishing the review:
-# if [ "$AUTO_FIX" = "true" ] && [ "$VERDICT" = "REQUEST_CHANGES" ]; then
-#   os_divider
-#   os_info "Verdict is REQUEST CHANGES — launching fix loop..."
-#   "$CLI_DIR/bin/os-review-fix" "$PR_NUMBER"
-# fi

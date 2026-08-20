@@ -14,7 +14,7 @@ off to a developer for autonomous implementation.
    - Stack standards path and load it
    - Tooling commands: `build_command`, `test_command`, `run_command`, `coverage_command`
 2. Read `ai-specs/specs/base-standards.mdc`
-3. Read any existing plans under `ai-specs/changes/` for related context
+3. Read any existing plans under `ai-specs/changes/planes/` for related context
 4. Fetch ticket details from Jira MCP (if available) or from a provided description
 
 ## Process
@@ -22,12 +22,20 @@ off to a developer for autonomous implementation.
 1. Adopt the role defined in the active stack agent
 2. Analyze the ticket: identify affected layers (Domain, Application, Presentation, Infrastructure)
 3. Propose the implementation plan following the output format below
-4. Save the plan at `ai-specs/changes/<ticket-id>_backend.md`
+4. Save the plan at `ai-specs/changes/planes/<ticket-id>/<ticket-id>_backend.md`
 5. **Do not write any implementation code — plan only**
+
+## Language
+
+Write the entire plan (including section headers) in the Active Language from the prompt.
+When Active Language is Spanish, use headers like `# Plan de implementación backend: …`,
+`## 1. Resumen`, `## Contexto de arquitectura`, etc. Do not leave English headers
+when the active language is `es`. Keep Vault hook names and `contracts_api` types untranslated.
 
 ## Output format
 
-Save a markdown file at `ai-specs/changes/<ticket-id>_backend.md` with this structure:
+Save a markdown file at `ai-specs/changes/planes/<ticket-id>/<ticket-id>_backend.md` with this structure
+(English labels below — translate headers when Active Language is not English):
 
 ---
 
@@ -142,5 +150,5 @@ Business rules, constraints, and important reminders.
 
 Your final message must include the plan file path:
 
-> I've created a plan at `ai-specs/changes/<ticket-id>_backend.md`.
+> I've created a plan at `ai-specs/changes/planes/<ticket-id>/<ticket-id>_backend.md`.
 > Please review it before proceeding with implementation.

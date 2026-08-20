@@ -67,6 +67,8 @@ os-stack --list                        # listar stacks disponibles
 os-stack vault-smart-contracts         # activar stack
 os-agent --list                        # listar agentes
 os-agent claude-code                   # activar agente (o copilot)
+os-language --list                     # listar idiomas de salida
+os-language es                         # generar planes, Jira, commits y PRs en español
 ```
 
 ### Gestión de Jira
@@ -83,7 +85,7 @@ os-transition KAN-XX "En curso"        # mover ticket de estado
 ```bash
 os-enrich KAN-XX                       # enriquecer ticket con contexto técnico
 os-enrich-apply KAN-XX                 # subir enriquecimiento a Jira
-os-plan KAN-XX                         # generar plan → ai-specs/changes/KAN-XX_backend.md
+os-plan KAN-XX                         # generar plan → ai-specs/changes/planes/KAN-XX/KAN-XX_backend.md
 os-develop KAN-XX                      # crear rama feature/KAN-XX-backend + implementar
 os-commit KAN-XX                       # commit + push + PR → develop (NUNCA a main/develop directo)
 os-review PR_NUMBER                    # generar code review del PR
@@ -117,7 +119,7 @@ os-enrich KAN-XX                  # prompt al portapapeles → pega en agente
 os-enrich-apply KAN-XX            # sube a Jira
 
 os-plan KAN-XX                    # prompt al portapapeles → pega en agente
-                                  # guarda output en ai-specs/changes/KAN-XX_backend.md
+                                  # guarda output en ai-specs/changes/planes/KAN-XX/KAN-XX_backend.md
 
 os-develop KAN-XX                 # crea branch desde develop + implementa
 

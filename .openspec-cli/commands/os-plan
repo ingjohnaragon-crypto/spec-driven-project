@@ -13,6 +13,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
 . "$CLI_DIR/lib/agent.sh"
+. "$CLI_DIR/lib/language.sh"
 
 if [ -z "$TICKET_ID" ]; then
   os_error "Usage: os-plan <TICKET-ID>  (e.g. os-plan KAN-42)"
@@ -23,14 +24,18 @@ fi
 os_load_config
 os_load_env
 os_load_agent
+os_load_language
 
 os_print_config
 os_print_agent
+os_print_language
 
 # ── Fetch Jira ticket ────────────────────────────────────────
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
+os_jira_fetch_subtasks "$TICKET_ID"
+os_jira_print_subtasks
 
 # ── Load stack context ───────────────────────────────────────
 os_step "Loading stack agent and standards..."
@@ -70,6 +75,10 @@ os_step "Building prompt..."
 
 PROMPT="You are acting as the backend-developer agent for an openspec project.
 
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
+
 ## Active Stack
 Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Build    : $OS_BUILD_CMD
@@ -85,6 +94,11 @@ Assignee : $JIRA_ASSIGNEE
 
 ### Description
 $JIRA_DESCRIPTION
+
+---
+
+## Subtasks
+$JIRA_SUBTASKS_CONTEXT
 
 ---
 
@@ -113,7 +127,7 @@ printf '%s' "$PROMPT" > "$PROMPT_FILE"
 NEXT_STEPS="1. Open $OS_AGENT_LABEL
 2. Paste the prompt
 3. The AI will generate the plan at:
-   ai-specs/changes/${TICKET_ID}_backend.md
+   ai-specs/changes/planes/${TICKET_ID}/${TICKET_ID}_backend.md
 4. Review the plan, then run:
    os-develop $TICKET_ID"
 
