@@ -20,7 +20,6 @@ with open(contract_file, encoding="utf-8") as f:
 
 def extract_supported_denominations(source: str) -> list:
     patterns = (
-        r"SUPPORTED_DENOMINATIONS\s*=\s*(\[[^\]]+\])",
         r"supported_denominations\s*=\s*(\[[^\]]+\])",
     )
     for pattern in patterns:

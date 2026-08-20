@@ -50,8 +50,7 @@ description  = (
     "disbursed automatically on the maturity date together with the principal."
 )
 tside                   = Tside.LIABILITY
-SUPPORTED_DENOMINATIONS = ["GBP", "USD", "EUR", "COP"]
-supported_denominations = SUPPORTED_DENOMINATIONS
+supported_denominations = ["GBP", "USD", "EUR", "COP"]
 
 DEFAULT_ADDRESS  = "DEFAULT"
 DEFAULT_ASSET    = "COMMERCIAL_BANK_MONEY"
@@ -63,7 +62,7 @@ MATURITY_EVENT   = "MATURITY_EVENT"
 parameters = [
     Parameter(
         name="denomination",
-        shape=DenominationShape(permitted_denominations=SUPPORTED_DENOMINATIONS),
+        shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
         description="Account denomination. One currency per account.",
