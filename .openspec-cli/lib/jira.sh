@@ -184,40 +184,57 @@ os_jira_create_ticket() {
 
   os_step "Creating $_type in project $_project..."
 
+  # Prefer project-local converter, then installed ~/.openspec copy.
+  _md_to_adf=""
+  if [ -n "${OS_CLI_LIB:-}" ] && [ -f "${OS_CLI_LIB}/md_to_adf.py" ]; then
+    _md_to_adf="${OS_CLI_LIB}/md_to_adf.py"
+  elif [ -f "$HOME/.openspec/lib/md_to_adf.py" ]; then
+    _md_to_adf="$HOME/.openspec/lib/md_to_adf.py"
+  fi
+
   _payload=$(py -c "
 import json, sys
+from pathlib import Path
 
 summary     = sys.argv[1]
 description = sys.argv[2]
 project     = sys.argv[3]
 issuetype   = sys.argv[4]
+converter   = sys.argv[5]
 
-paragraphs = []
-for para in description.split('\n\n'):
-    para = para.strip()
-    if para:
-        paragraphs.append({
-            'type': 'paragraph',
-            'content': [{'type': 'text', 'text': para}]
-        })
+if converter:
+    sys.path.insert(0, str(Path(converter).resolve().parent))
+    from md_to_adf import markdown_to_adf
+    description_adf = markdown_to_adf(description)
+else:
+    # Fallback: flat paragraphs (legacy)
+    paragraphs = []
+    for para in description.split('\n\n'):
+        para = para.strip()
+        if para:
+            paragraphs.append({
+                'type': 'paragraph',
+                'content': [{'type': 'text', 'text': para}]
+            })
+    description_adf = {
+        'type': 'doc',
+        'version': 1,
+        'content': paragraphs or [
+            {'type': 'paragraph',
+             'content': [{'type': 'text', 'text': description}]}
+        ]
+    }
 
-body = 
+body = {
     'fields': {
         'project':     {'key': project},
         'summary':     summary,
         'issuetype':   {'name': issuetype},
-        'description': {
-            'type':    'doc',
-            'version': 1,
-            'content': paragraphs or [
-                {'type': 'paragraph',
-                 'content': [{'type': 'text', 'text': description}]}
-            ]
-        }
+        'description': description_adf,
     }
 }
-print(json.dumps(body))
-" "$_summary" "$_desc" "$_project" "$_type")
+print(json.dumps(body, ensure_ascii=False))
+" "$_summary" "$_desc" "$_project" "$_type" "$_md_to_adf")
 
   _response=$(curl -s \
     -X POST \

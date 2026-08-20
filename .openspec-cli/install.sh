@@ -51,7 +51,7 @@ fi
 mkdir -p "$BIN_DIR" "$INSTALL_DIR/lib"
 
 # ── Copy lib files (commands resolve CLI_DIR as ~/.openspec) ──
-for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py; do
+for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py "$REPO_CLI_DIR/lib/"*.md; do
   [ -f "$lib_file" ] || continue
   lib_name=$(basename "$lib_file")
   sed 's/\r//' "$lib_file" > "$INSTALL_DIR/lib/$lib_name"

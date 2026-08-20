@@ -66,6 +66,78 @@ fi
 if [ "$GENERATE_HU" = "true" ]; then
   os_step "Generating user story with AI..."
 
+  if [ "${OS_ACTIVE_LANGUAGE:-en}" = "es" ]; then
+    HU_TEMPLATE="Escribe SOLO el contenido de la historia (sin preámbulos ni explicaciones).
+Usa este formato exacto, con lenguaje claro y fácil de leer en Jira:
+
+## Historia de usuario
+Como [rol], quiero [capacidad], para [beneficio].
+
+## Contexto
+2-4 oraciones cortas que expliquen el problema de negocio y el resultado esperado.
+Evita jerga innecesaria; si usas términos técnicos, hazlo en la sección técnica.
+
+## Criterios de aceptación
+- [ ] Criterio de negocio 1 (observable y verificable)
+- [ ] Criterio de negocio 2
+- [ ] Criterio de negocio 3
+- [ ] os-vault-test pasa (todos los tests en verde)
+- [ ] os-vault-test --coverage pasa (>= 90%)
+- [ ] El contrato respeta las restricciones del sandbox Python de Vault
+
+## Notas técnicas
+- Hooks Vault: ...
+- Tipos contracts_api: ...
+- Archivos: contracts/<nombre>.py + tests/test_<nombre>.py
+
+## Definición de terminado
+- [ ] os-vault-test 100% verde
+- [ ] Cobertura >= 90%
+- [ ] PR revisado y aprobado
+- [ ] Ticket Jira movido a Done
+
+Reglas de estilo:
+- Párrafos cortos (1-3 oraciones).
+- Listas con un criterio por línea.
+- No uses bloques de código salvo que sea imprescindible.
+- No dejes marcadores markdown crudos fuera del formato de arriba."
+  else
+    HU_TEMPLATE="Write ONLY the user story content (no preamble).
+Use this exact format, clear and easy to read in Jira:
+
+## User Story
+As a [role], I want [capability], so that [benefit].
+
+## Context
+2-4 short sentences explaining the business problem and expected outcome.
+Keep jargon out of this section; put technical detail below.
+
+## Acceptance Criteria
+- [ ] Business criterion 1 (observable and testable)
+- [ ] Business criterion 2
+- [ ] Business criterion 3
+- [ ] os-vault-test passes (all tests green)
+- [ ] os-vault-test --coverage passes (>= 90%)
+- [ ] Contract respects Vault Python sandbox restrictions
+
+## Technical Notes
+- Vault hooks: ...
+- contracts_api types: ...
+- Files: contracts/<name>.py + tests/test_<name>.py
+
+## Definition of Done
+- [ ] os-vault-test 100% green
+- [ ] Coverage >= 90%
+- [ ] PR reviewed and approved
+- [ ] Jira ticket moved to Done
+
+Style rules:
+- Short paragraphs (1-3 sentences).
+- One criterion per list line.
+- Avoid code fences unless essential.
+- Do not leave raw markdown markers outside the format above."
+  fi
+
   PROMPT="Generate a complete Jira user story for a Vault Smart Contract project.
 
 ## Active Language
@@ -76,29 +148,7 @@ Title: $SUMMARY
 Stack: vault-smart-contracts (Thought Machine Vault, API 4.0)
 Project context: OpenSpec — spec-driven development framework for Vault Smart Contracts
 
-Write ONLY the user story content using this format:
-
-## User Story
-As a [role], I want [capability], so that [benefit].
-
-## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
-- [ ] Criterion 3
-- [ ] os-vault-test passes (all tests green)
-- [ ] os-vault-test --coverage passes (>= 90%)
-- [ ] Contract respects Vault Python sandbox restrictions
-
-## Technical Notes
-- Vault hooks involved: list the relevant hooks
-- contracts_api types needed: list the types
-- Files: contracts/<name>.py + tests/test_<name>.py
-
-## Definition of Done
-- [ ] os-vault-test 100% green
-- [ ] Coverage >= 90%
-- [ ] PR reviewed and approved
-- [ ] Jira ticket moved to Done"
+$HU_TEMPLATE"
 
   PROMPT_FILE="${OS_REPO_ROOT}/.openspec-cli/.last-prompt.md"
   OUTPUT_FILE="${OS_REPO_ROOT}/.openspec-cli/.last-ai-output.md"
