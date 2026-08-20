@@ -212,6 +212,18 @@ class TestPrePostingDeposits:
         assert result.rejection is not None
         assert result.rejection.reason_code == RejectionReason.WRONG_DENOMINATION
 
+    def test_usd_deposit_accepted_on_usd_account(self):
+        vault   = make_vault(default_balance=Decimal("0"), denomination="USD")
+        posting = make_posting(Decimal("1000"), credit=True, denomination="USD")
+        result  = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
+    def test_cop_deposit_accepted_on_cop_account(self):
+        vault   = make_vault(default_balance=Decimal("0"), denomination="COP")
+        posting = make_posting(Decimal("500000"), credit=True, denomination="COP")
+        result  = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
 
 # ── 3. Pre-posting — withdrawals ───────────────────────────────────────────────
 
@@ -476,3 +488,9 @@ class TestDerivedParameters:
         result = contract.derived_parameter_hook(vault, args)
 
         assert result.parameters_return_value["days_to_maturity"] == 0
+
+
+class TestProductMetadata:
+
+    def test_supported_denominations_include_common_currencies(self):
+        assert contract.supported_denominations == ["GBP", "USD", "EUR", "COP"]

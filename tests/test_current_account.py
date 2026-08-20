@@ -67,12 +67,14 @@ def make_vault(balance: Decimal = Decimal("1000"),
 
 
 def make_posting_instruction(amount: Decimal,
-                              credit: bool = False) -> MagicMock:
+                              credit: bool = False,
+                              denomination: str = DEFAULT_DENOM) -> MagicMock:
     pi  = MagicMock()
+    pi.denomination = denomination
     key = BalanceCoordinate(
         account_address=DEFAULT_ADDRESS,
         asset=DEFAULT_ASSET,
-        denomination=DEFAULT_DENOM,
+        denomination=denomination,
         phase=Phase.COMMITTED,
     )
     net        = amount if credit else -amount
@@ -161,6 +163,24 @@ class TestPrePostingHook:
         assert result.rejection is None
 
 
+    def test_allows_usd_withdrawal_using_overdraft(self):
+        vault   = make_vault(
+            balance=Decimal("100"),
+            overdraft_limit=Decimal("500"),
+            denomination="USD",
+        )
+        posting = make_posting_instruction(Decimal("400"), credit=False, denomination="USD")
+        result  = contract.pre_posting_hook(vault, self._make_args(posting))
+        assert result.rejection is None
+
+    def test_rejects_wrong_denomination(self):
+        vault   = make_vault(balance=Decimal("500"), overdraft_limit=Decimal("0"), denomination="COP")
+        posting = make_posting_instruction(Decimal("100"), credit=True, denomination="USD")
+        result  = contract.pre_posting_hook(vault, self._make_args(posting))
+        assert result.rejection is not None
+        assert result.rejection.reason_code == RejectionReason.WRONG_DENOMINATION
+
+
 # ══════════════════════════════════════════════════════════════
 # post_posting_hook
 # ══════════════════════════════════════════════════════════════
@@ -210,13 +230,16 @@ class TestHelpers:
 
     def test_posting_net_effect_debit(self):
         posting = make_posting_instruction(Decimal("300"), credit=False)
-        result  = contract._posting_net_effect([posting])
+        result  = contract._posting_net_effect([posting], DEFAULT_DENOM)
         assert result == Decimal("-300")
 
     def test_posting_net_effect_credit(self):
         posting = make_posting_instruction(Decimal("300"), credit=True)
-        result  = contract._posting_net_effect([posting])
+        result  = contract._posting_net_effect([posting], DEFAULT_DENOM)
         assert result == Decimal("300")
+
+    def test_supported_denominations_include_common_currencies(self):
+        assert contract.supported_denominations == ["GBP", "USD", "EUR", "COP"]
 
     def test_calculate_available_balance_with_overdraft(self):
         result = contract._calculate_available_balance(Decimal("100"), Decimal("500"))
