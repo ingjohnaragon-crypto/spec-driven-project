@@ -45,15 +45,22 @@ os_load_config() {
 os_load_env() {
   env_file="${OS_REPO_ROOT:-$(pwd)}/.env"
   if [ ! -f "$env_file" ]; then os_warn ".env not found"; return; fi
-  JIRA_BASE_URL=$(grep "^JIRA_BASE_URL=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_EMAIL=$(grep    "^JIRA_EMAIL="    "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_TOKEN=$(grep    "^JIRA_TOKEN="    "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_PROJECT_KEY=$(grep "^JIRA_PROJECT_KEY=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_BASE_URL=$(grep "^VAULT_BASE_URL=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_TOKEN=$(grep "^VAULT_TOKEN=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_DEFAULT_DENOMINATION=$(grep "^VAULT_DEFAULT_DENOMINATION=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY
+  # Under `set -o pipefail`, a missing key makes `grep` exit 1 and aborts the
+  # caller (e.g. os-transition). Read optional keys safely.
+  _os_env_get() {
+    grep "^$1=" "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true
+  }
+  JIRA_BASE_URL=$(_os_env_get JIRA_BASE_URL)
+  JIRA_EMAIL=$(_os_env_get JIRA_EMAIL)
+  JIRA_TOKEN=$(_os_env_get JIRA_TOKEN)
+  JIRA_PROJECT_KEY=$(_os_env_get JIRA_PROJECT_KEY)
+  JIRA_STORY_POINTS_FIELD=$(_os_env_get JIRA_STORY_POINTS_FIELD)
+  VAULT_BASE_URL=$(_os_env_get VAULT_BASE_URL)
+  VAULT_TOKEN=$(_os_env_get VAULT_TOKEN)
+  VAULT_DEFAULT_DENOMINATION=$(_os_env_get VAULT_DEFAULT_DENOMINATION)
+  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY JIRA_STORY_POINTS_FIELD
   export VAULT_BASE_URL VAULT_TOKEN VAULT_DEFAULT_DENOMINATION
+  unset -f _os_env_get
   os_success "Loaded .env"
 }
 
