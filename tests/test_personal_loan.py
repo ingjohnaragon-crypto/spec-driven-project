@@ -1,312 +1,330 @@
-import importlib
+# tests/test_personal_loan.py
+# API 4.0 — Personal Loan unit tests
+
+from datetime import datetime
 from decimal import Decimal
+from unittest.mock import MagicMock
+from zoneinfo import ZoneInfo
+
+from contracts_api import (
+    ActivationHookArguments,
+    Balance,
+    BalanceCoordinate,
+    BalanceDefaultDict,
+    Phase,
+    PostPostingHookArguments,
+    PrePostingHookArguments,
+    RejectionReason,
+    ScheduledEventHookArguments,
+)
+
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import contracts.personal_loan as contract
+
+UTC = ZoneInfo("UTC")
+DEFAULT_DENOM = "GBP"
+DEFAULT_ASSET = "COMMERCIAL_BANK_MONEY"
+ACTIVATION_DATE = datetime(2024, 1, 15, tzinfo=UTC)
 
 
-def test_personal_loan_module_imports():
-    """Basic smoke tests to ensure the contract module and expected hooks exist."""
-    module = importlib.import_module('contracts.personal_loan')
-
-    assert hasattr(module, 'activation_hook'), 'activation_hook missing'
-    assert hasattr(module, 'scheduled_event_hook'), 'scheduled_event_hook missing'
-    assert hasattr(module, 'pre_posting_code'), 'pre_posting_code missing'
-    assert callable(module.activation_hook)
-    assert callable(module.scheduled_event_hook)
-    assert callable(module.pre_posting_code)
-
-
-def test_helpers_present():
-    module = importlib.import_module('contracts.personal_loan')
-    assert hasattr(module, '_calculate_schedule')
-    assert callable(module._calculate_schedule)
-
-
-def test_calculate_schedule_annuity():
-    """Verify annuity monthly payment and that total principal equals initial principal."""
-    module = importlib.import_module('contracts.personal_loan')
-    principal = Decimal('1000.00')
-    annual_rate = Decimal('12')  # 12% per year
-    term = 12
-
-    schedule = module._calculate_schedule(principal, annual_rate, term, denomination='GBP')
-
-    assert len(schedule) == term
-
-    # All payments should be equal (annuity) except for tiny rounding adjustments
-    payments = [entry['payment'] for entry in schedule]
-    # Compare first payment with every other within 0.01 tolerance
-    first_payment = payments[0]
-    for p in payments[1:]:
-        assert abs(p - first_payment) <= Decimal('0.01')
-
-    # Sum of principal_due must equal the original principal (within rounding)
-    total_principal = sum(entry['principal_due'] for entry in schedule)
-    assert total_principal == principal.quantize(Decimal('0.01'))
-
-    # First month's interest should equal principal * monthly_rate quantized
-    monthly_rate = (annual_rate / Decimal('100')) / Decimal('12')
-    expected_first_interest = (principal * monthly_rate).quantize(Decimal('0.01'))
-    assert schedule[0]['interest_due'] == expected_first_interest
+def make_balance_dict(
+    default_balance: Decimal = Decimal("0"),
+    denomination: str = DEFAULT_DENOM,
+) -> BalanceDefaultDict:
+    balances = BalanceDefaultDict()
+    key = BalanceCoordinate(
+        account_address="DEFAULT",
+        asset=DEFAULT_ASSET,
+        denomination=denomination,
+        phase=Phase.COMMITTED,
+    )
+    credit = default_balance if default_balance >= 0 else Decimal("0")
+    debit = Decimal("0") if default_balance >= 0 else abs(default_balance)
+    balances[key] = Balance(net=default_balance, credit=credit, debit=debit)
+    return balances
 
 
-def test_scheduled_event_hook_returns_postings():
-    """Call scheduled_event_hook with dict-like hook_arguments and verify postings."""
-    module = importlib.import_module('contracts.personal_loan')
-
-    hook_args = {
-        'principal': '1200.00',
-        'interest_rate': '12',
-        'term_months': 12,
-        'denomination': 'GBP',
-        'period': 1,
+def make_vault(
+    default_balance: Decimal = Decimal("0"),
+    denomination: str = DEFAULT_DENOM,
+    principal: Decimal = Decimal("1200.00"),
+    annual_interest_rate: Decimal = Decimal("0.12"),
+    term_months: Decimal = Decimal("12"),
+    repayment_day: Decimal = Decimal("1"),
+    prepayment_penalty_rate: Decimal = Decimal("0.02"),
+) -> MagicMock:
+    vault = MagicMock()
+    vault.account_id = "test_loan_account"
+    param_map = {
+        "denomination": denomination,
+        "principal": principal,
+        "annual_interest_rate": annual_interest_rate,
+        "term_months": term_months,
+        "repayment_day": repayment_day,
+        "prepayment_penalty_rate": prepayment_penalty_rate,
     }
-
-    result = module.scheduled_event_hook(hook_args)
-    # result is either SDK CustomInstruction or dict fallback
-    assert result is not None
-    # If dict fallback, expect keys
-    if isinstance(result, dict):
-        assert 'postings' in result
-        postings = result['postings']
-    else:
-        # SDK object — try to extract postings attribute
-        postings = getattr(result, 'postings', None)
-
-    assert postings is not None
-    # Expect two postings: interest and principal
-    assert len(postings) == 2
-
-    # Confirm the amounts correspond to the schedule first period
-    schedule = module._calculate_schedule(Decimal('1200.00'), Decimal('12'), 12, 'GBP')
-    first = schedule[0]
-    # postings may be dicts with 'amount' strings
-    p_amounts = [Decimal(p['amount']) if isinstance(p, dict) else Decimal(getattr(p, 'amount', '0')) for p in postings]
-    assert any(abs(a - first['interest_due']) <= Decimal('0.01') for a in p_amounts)
-    assert any(abs(a - first['principal_due']) <= Decimal('0.01') for a in p_amounts)
+    vault.get_parameter_timeseries.side_effect = lambda name: MagicMock(
+        latest=MagicMock(return_value=param_map[name])
+    )
+    obs = MagicMock()
+    obs.balances = make_balance_dict(default_balance, denomination)
+    vault.get_balances_observation.return_value = obs
+    vault.get_hook_execution_id.return_value = "test-hook-exec-id"
+    return vault
 
 
-def test_pre_posting_code_applies_penalty_and_reduction():
-    module = importlib.import_module('contracts.personal_loan')
-
-    hook_args = {
-        'prepayment': {
-            'amount': '200.00',
-            'denomination': 'GBP',
-        },
-        'outstanding_principal': '1000.00',
-        'prepayment_penalty': {'type': 'percent', 'value': '1.0'},  # 1%
-    }
-
-    result = module.pre_posting_code(hook_args)
-    assert result is not None
-
-    # If PrePostingHookResult wrapper returned, it might be the SDK object; support dict fallback
-    if isinstance(result, dict) and result.get('rejection'):
-        # unexpected rejection
-        raise AssertionError(f'Unexpected rejection: {result}')
-
-    instruction = None
-    if isinstance(result, dict) and result.get('instruction'):
-        instruction = result['instruction']
-    elif isinstance(result, dict) and 'postings' in result:
-        instruction = result
-    else:
-        # SDK object likely returned directly
-        instruction = result
-
-    assert instruction is not None
-
-    postings = instruction.get('postings') if isinstance(instruction, dict) else getattr(instruction, 'postings', None)
-    assert postings is not None
-    # Expect penalty and principal reduction postings
-    types = [p.get('type') if isinstance(p, dict) else getattr(p, 'type', None) for p in postings]
-    assert 'penalty' in types
-    assert 'prepayment_principal' in types
+def make_posting(
+    amount: Decimal,
+    credit: bool = True,
+    denomination: str = DEFAULT_DENOM,
+) -> MagicMock:
+    pi = MagicMock()
+    pi.denomination = denomination
+    key = BalanceCoordinate(
+        account_address="DEFAULT",
+        asset=DEFAULT_ASSET,
+        denomination=denomination,
+        phase=Phase.COMMITTED,
+    )
+    net = amount if credit else -amount
+    bal_dict = BalanceDefaultDict()
+    bal_dict[key] = Balance(
+        net=net,
+        credit=amount if credit else Decimal("0"),
+        debit=Decimal("0") if credit else amount,
+    )
+    pi.balances.return_value = bal_dict
+    return pi
 
 
-def test_pre_posting_code_rejects_denom_mismatch():
-    module = importlib.import_module('contracts.personal_loan')
-
-    hook_args = {
-        'prepayment': {'amount': '100.00', 'denomination': 'USD'},
-        'denomination': 'GBP',
-        'outstanding_principal': '1000.00',
-        'prepayment_penalty': {'type': 'percent', 'value': '1.0'},
-    }
-
-    result = module.pre_posting_code(hook_args)
-    assert result is not None
-    # Expect a rejection in dict fallback or SDK PrePostingHookResult
-    if isinstance(result, dict):
-        assert 'rejection' in result or (result.get('instruction') is None)
-    else:
-        # SDK object: try to detect rejection attribute
-        rej = getattr(result, 'rejection', None)
-        assert rej is not None
+def make_pre_posting_args(posting) -> PrePostingHookArguments:
+    return PrePostingHookArguments(
+        effective_datetime=ACTIVATION_DATE,
+        posting_instructions=[posting],
+        client_transactions={},
+    )
 
 
-def test_pre_posting_code_rejects_overpay():
-    module = importlib.import_module('contracts.personal_loan')
-
-    hook_args = {
-        'prepayment': {'amount': '2000.00', 'denomination': 'GBP'},
-        'outstanding_principal': '1000.00',
-        'prepayment_penalty': {'type': 'percent', 'value': '1.0'},
-    }
-
-    result = module.pre_posting_code(hook_args)
-    assert result is not None
-    if isinstance(result, dict):
-        assert 'rejection' in result
-    else:
-        rej = getattr(result, 'rejection', None)
-        assert rej is not None
+def make_post_posting_args(posting) -> PostPostingHookArguments:
+    return PostPostingHookArguments(
+        effective_datetime=ACTIVATION_DATE,
+        posting_instructions=[posting],
+        client_transactions={},
+    )
 
 
-def test_activation_hook_creates_disbursement():
-    module = importlib.import_module('contracts.personal_loan')
-    hook_args = {'principal': '5000.00', 'denomination': 'GBP'}
-    result = module.activation_hook(hook_args)
-    assert result is not None
-    if isinstance(result, dict):
-        postings = result.get('postings')
-    else:
-        postings = getattr(result, 'postings', None)
-    assert postings is not None
-    # Expect a single disbursement posting with the principal amount
-    assert len(postings) == 1
-    p = postings[0]
-    amount = Decimal(p['amount']) if isinstance(p, dict) else Decimal(getattr(p, 'amount', '0'))
-    assert amount == Decimal('5000.00')
-    t = p.get('type') if isinstance(p, dict) else getattr(p, 'type', None)
-    assert t == 'disbursement'
+def make_scheduled_args(event_type: str) -> ScheduledEventHookArguments:
+    return ScheduledEventHookArguments(
+        effective_datetime=ACTIVATION_DATE,
+        event_type=event_type,
+    )
 
 
-def test_zero_rate_schedule():
-    module = importlib.import_module('contracts.personal_loan')
-    principal = Decimal('1000.00')
-    annual_rate = Decimal('0')
-    term = 10
-    schedule = module._calculate_schedule(principal, annual_rate, term, 'GBP')
-    assert len(schedule) == term
-    payments = [entry['payment'] for entry in schedule]
-    # all payments equal principal/term
-    expected = (principal / Decimal(term)).quantize(Decimal('0.01'))
-    for p in payments:
-        assert p == expected
-    total_principal = sum(entry['principal_due'] for entry in schedule)
-    assert total_principal == principal
+# ── Metadata / helpers ─────────────────────────────────────────────────────────
+
+class TestMetadata:
+    def test_supported_denominations_include_common_currencies(self):
+        assert set(contract.supported_denominations) >= {"GBP", "USD", "EUR", "COP"}
+
+    def test_hooks_use_api_names(self):
+        assert hasattr(contract, "pre_posting_hook")
+        assert hasattr(contract, "post_posting_hook")
+        assert not hasattr(contract, "pre_posting_code")
+        assert not hasattr(contract, "post_posting_code")
+
+    def test_parameters_populated(self):
+        names = {p.name for p in contract.parameters}
+        assert {
+            "denomination",
+            "principal",
+            "annual_interest_rate",
+            "term_months",
+            "repayment_day",
+            "prepayment_penalty_rate",
+        }.issubset(names)
 
 
-def test_pre_posting_code_fixed_penalty():
-    module = importlib.import_module('contracts.personal_loan')
-    hook_args = {
-        'prepayment': {'amount': '100.00', 'denomination': 'GBP'},
-        'outstanding_principal': '500.00',
-        'prepayment_penalty': {'type': 'fixed', 'value': '5.00'},
-    }
-    result = module.pre_posting_code(hook_args)
-    assert result is not None
-    # Extract instruction/postings
-    if isinstance(result, dict) and result.get('instruction'):
-        instr = result['instruction']
-    elif isinstance(result, dict) and 'postings' in result:
-        instr = result
-    else:
-        instr = result
-    postings = instr.get('postings') if isinstance(instr, dict) else getattr(instr, 'postings', None)
-    assert postings is not None
-    # Find penalty posting
-    found_penalty = False
-    for p in postings:
-        ptype = p.get('type') if isinstance(p, dict) else getattr(p, 'type', None)
-        if ptype == 'penalty':
-            amt = Decimal(p['amount']) if isinstance(p, dict) else Decimal(getattr(p, 'amount', '0'))
-            assert amt == Decimal('5.00')
-            found_penalty = True
-    assert found_penalty
+class TestScheduleHelpers:
+    def test_annuity_schedule_12_months(self):
+        schedule = contract._build_amortization_schedule(
+            Decimal("1000.00"), Decimal("0.12"), 12
+        )
+        assert len(schedule) == 12
+        first = schedule[0]["payment"]
+        for entry in schedule[:-1]:
+            assert abs(entry["payment"] - first) <= Decimal("0.01")
+        total_principal = sum(e["principal_due"] for e in schedule)
+        assert total_principal == Decimal("1000.00")
+        monthly_rate = Decimal("0.12") / Decimal("12")
+        assert schedule[0]["interest_due"] == (
+            Decimal("1000.00") * monthly_rate
+        ).quantize(Decimal("0.01"))
+
+    def test_zero_rate_schedule(self):
+        schedule = contract._build_amortization_schedule(
+            Decimal("1000.00"), Decimal("0"), 10
+        )
+        assert len(schedule) == 10
+        assert sum(e["principal_due"] for e in schedule) == Decimal("1000.00")
+        assert all(e["interest_due"] == Decimal("0.00") for e in schedule)
+
+    def test_final_period_clears_residual(self):
+        schedule = contract._build_amortization_schedule(
+            Decimal("1000.00"), Decimal("0.12"), 12
+        )
+        assert schedule[-1]["balance"] == Decimal("0.00")
+
+    def test_recompute_term_shortens_after_prepayment(self):
+        installment = contract._installment_from_schedule(
+            Decimal("1200.00"), Decimal("0.12"), 12
+        )
+        remaining = contract._recompute_term_after_prepayment(
+            Decimal("600.00"), installment, Decimal("0.12")
+        )
+        assert 1 <= remaining < 12
 
 
-def test_scheduled_event_hook_invalid_period_noop():
-    module = importlib.import_module('contracts.personal_loan')
-    hook_args = {'principal': '1000.00', 'interest_rate': '5', 'term_months': 12, 'period': 999}
-    result = module.scheduled_event_hook(hook_args)
-    assert result is None
+# ── Activation ─────────────────────────────────────────────────────────────────
+
+class TestActivationHook:
+    def test_activation_disburses_and_schedules(self):
+        vault = make_vault(principal=Decimal("5000.00"))
+        args = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
+        result = contract.activation_hook(vault, args)
+        assert contract.MONTHLY_REPAYMENT in result.scheduled_events_return_value
+        assert len(result.posting_instructions_directives) == 1
+        instr = result.posting_instructions_directives[0].posting_instructions[0]
+        amounts = [p.amount for p in instr.postings]
+        assert Decimal("5000.00") in amounts
+
+    def test_activation_rejects_non_positive_principal(self):
+        vault = make_vault(principal=Decimal("0"))
+        args = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
+        try:
+            contract.activation_hook(vault, args)
+            raise AssertionError("expected ValueError")
+        except ValueError as exc:
+            assert "principal" in str(exc)
+
+    def test_activation_rejects_invalid_term(self):
+        vault = make_vault(term_months=Decimal("0"))
+        args = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
+        try:
+            contract.activation_hook(vault, args)
+            raise AssertionError("expected ValueError")
+        except ValueError as exc:
+            assert "term_months" in str(exc)
 
 
-def test_pre_posting_code_no_prepayment_returns_none():
-    module = importlib.import_module('contracts.personal_loan')
-    hook_args = {}
-    result = module.pre_posting_code(hook_args)
-    assert result is None
+# ── Scheduled monthly repayment ────────────────────────────────────────────────
+
+class TestMonthlyRepayment:
+    def test_monthly_event_posts_repayment(self):
+        vault = make_vault(default_balance=Decimal("1200.00"))
+        result = contract.scheduled_event_hook(
+            vault, make_scheduled_args(contract.MONTHLY_REPAYMENT)
+        )
+        assert len(result.posting_instructions_directives) == 1
+        details = result.posting_instructions_directives[0].posting_instructions[
+            0
+        ].instruction_details
+        assert "interest_due" in details
+        assert "principal_due" in details
+
+    def test_zero_outstanding_noop(self):
+        vault = make_vault(default_balance=Decimal("0"))
+        result = contract.scheduled_event_hook(
+            vault, make_scheduled_args(contract.MONTHLY_REPAYMENT)
+        )
+        assert result.posting_instructions_directives == []
+
+    def test_unknown_event_noop(self):
+        vault = make_vault(default_balance=Decimal("1200.00"))
+        result = contract.scheduled_event_hook(
+            vault, make_scheduled_args("UNKNOWN_EVENT")
+        )
+        assert result.posting_instructions_directives == []
 
 
-def test_post_posting_code_noop():
-    module = importlib.import_module('contracts.personal_loan')
-    assert module.post_posting_code({}) is None
+# ── Prepayment validations ─────────────────────────────────────────────────────
+
+class TestPrePostingHook:
+    def test_partial_prepayment_accepted(self):
+        vault = make_vault(default_balance=Decimal("1000.00"))
+        # repayment reduces DEFAULT → credit=False amount means net negative in helper
+        posting = make_posting(Decimal("200.00"), credit=False)
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
+    def test_full_prepayment_accepted(self):
+        vault = make_vault(default_balance=Decimal("1000.00"))
+        posting = make_posting(Decimal("1000.00"), credit=False)
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
+    def test_overpay_rejected(self):
+        vault = make_vault(default_balance=Decimal("1000.00"))
+        posting = make_posting(Decimal("1500.00"), credit=False)
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is not None
+        assert result.rejection.reason_code == RejectionReason.AGAINST_TNC
+
+    def test_wrong_denomination_rejected(self):
+        vault = make_vault(default_balance=Decimal("1000.00"), denomination="GBP")
+        posting = make_posting(Decimal("100.00"), credit=False, denomination="USD")
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is not None
+        assert result.rejection.reason_code == RejectionReason.WRONG_DENOMINATION
+
+    def test_non_prepayment_passes(self):
+        vault = make_vault(default_balance=Decimal("1000.00"))
+        posting = make_posting(Decimal("50.00"), credit=True)
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
+    def test_usd_account_accepts_usd_prepayment(self):
+        vault = make_vault(
+            default_balance=Decimal("1000.00"), denomination="USD"
+        )
+        posting = make_posting(Decimal("100.00"), credit=False, denomination="USD")
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
+
+    def test_cop_account_accepts_cop_prepayment(self):
+        vault = make_vault(
+            default_balance=Decimal("1000.00"), denomination="COP"
+        )
+        posting = make_posting(Decimal("100.00"), credit=False, denomination="COP")
+        result = contract.pre_posting_hook(vault, make_pre_posting_args(posting))
+        assert result.rejection is None
 
 
-def test_build_custom_instruction_fallback_and_preposting_result_fallback():
-    module = importlib.import_module('contracts.personal_loan')
+# ── Penalty on post_posting ────────────────────────────────────────────────────
 
-    # Force CustomInstruction to raise so fallback dict path is taken
-    orig_ci = getattr(module, 'CustomInstruction', None)
-    def raise_ci(*args, **kwargs):
-        raise RuntimeError('ci fail')
-    module.CustomInstruction = raise_ci
+class TestPostPostingPenalty:
+    def test_penalty_applied_on_prepayment(self):
+        vault = make_vault(
+            default_balance=Decimal("800.00"),
+            prepayment_penalty_rate=Decimal("0.02"),
+        )
+        posting = make_posting(Decimal("200.00"), credit=False)
+        result = contract.post_posting_hook(vault, make_post_posting_args(posting))
+        assert len(result.posting_instructions_directives) == 1
+        instr = result.posting_instructions_directives[0].posting_instructions[0]
+        amounts = [p.amount for p in instr.postings]
+        assert Decimal("4.00") in amounts  # 2% of 200
 
-    try:
-        res = module._build_custom_instruction([{'amount': '1.00'}], details={'a': 1})
-        assert isinstance(res, dict)
-        assert 'postings' in res
-    finally:
-        # restore
-        module.CustomInstruction = orig_ci
+    def test_zero_penalty_rate_noop(self):
+        vault = make_vault(prepayment_penalty_rate=Decimal("0"))
+        posting = make_posting(Decimal("200.00"), credit=False)
+        result = contract.post_posting_hook(vault, make_post_posting_args(posting))
+        assert result.posting_instructions_directives == []
 
-    # Force PrePostingHookResult to raise to hit fallback
-    orig_pphr = getattr(module, 'PrePostingHookResult', None)
-    def raise_pphr(*args, **kwargs):
-        raise RuntimeError('pphr fail')
-    module.PrePostingHookResult = raise_pphr
-    try:
-        fallback = module._build_preposting_result(rejection_obj={'msg': 'x'})
-        assert isinstance(fallback, dict) and 'rejection' in fallback
-    finally:
-        module.PrePostingHookResult = orig_pphr
-
-    # Force Rejection to raise to hit rejection fallback
-    orig_rej = getattr(module, 'Rejection', None)
-    def raise_rej(*args, **kwargs):
-        raise RuntimeError('rej fail')
-    module.Rejection = raise_rej
-    try:
-        r = module._build_rejection('reason', reason_code=None)
-        assert isinstance(r, dict) and 'message' in r
-    finally:
-        module.Rejection = orig_rej
-
-
-def test_reload_module_without_contracts_api_import_falls_back():
-    import sys, importlib, builtins
-    module_name = 'contracts.personal_loan'
-    # Save original import
-    orig_import = builtins.__import__
-    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == 'contracts_api' or name.startswith('contracts_api.'):
-            raise ModuleNotFoundError('simulate missing')
-        return orig_import(name, globals, locals, fromlist, level)
-
-    # Remove module so reload will re-execute top-level
-    if module_name in sys.modules:
-        del sys.modules[module_name]
-
-    builtins.__import__ = fake_import
-    try:
-        mod = importlib.import_module(module_name)
-        # In fallback path, CustomInstruction should be set to object type
-        assert getattr(mod, 'CustomInstruction', None) in (object,)
-    finally:
-        # Restore import and reload original module to avoid side effects
-        builtins.__import__ = orig_import
-        if module_name in sys.modules:
-            del sys.modules[module_name]
-        importlib.import_module(module_name)
+    def test_non_prepayment_noop(self):
+        vault = make_vault()
+        posting = make_posting(Decimal("50.00"), credit=True)
+        result = contract.post_posting_hook(vault, make_post_posting_args(posting))
+        assert result.posting_instructions_directives == []
