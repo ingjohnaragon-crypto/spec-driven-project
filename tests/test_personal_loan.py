@@ -243,3 +243,70 @@ def test_pre_posting_code_no_prepayment_returns_none():
 def test_post_posting_code_noop():
     module = importlib.import_module('contracts.personal_loan')
     assert module.post_posting_code({}) is None
+
+
+def test_build_custom_instruction_fallback_and_preposting_result_fallback():
+    module = importlib.import_module('contracts.personal_loan')
+
+    # Force CustomInstruction to raise so fallback dict path is taken
+    orig_ci = getattr(module, 'CustomInstruction', None)
+    def raise_ci(*args, **kwargs):
+        raise RuntimeError('ci fail')
+    module.CustomInstruction = raise_ci
+
+    try:
+        res = module._build_custom_instruction([{'amount': '1.00'}], details={'a': 1})
+        assert isinstance(res, dict)
+        assert 'postings' in res
+    finally:
+        # restore
+        module.CustomInstruction = orig_ci
+
+    # Force PrePostingHookResult to raise to hit fallback
+    orig_pphr = getattr(module, 'PrePostingHookResult', None)
+    def raise_pphr(*args, **kwargs):
+        raise RuntimeError('pphr fail')
+    module.PrePostingHookResult = raise_pphr
+    try:
+        fallback = module._build_preposting_result(rejection_obj={'msg': 'x'})
+        assert isinstance(fallback, dict) and 'rejection' in fallback
+    finally:
+        module.PrePostingHookResult = orig_pphr
+
+    # Force Rejection to raise to hit rejection fallback
+    orig_rej = getattr(module, 'Rejection', None)
+    def raise_rej(*args, **kwargs):
+        raise RuntimeError('rej fail')
+    module.Rejection = raise_rej
+    try:
+        r = module._build_rejection('reason', reason_code=None)
+        assert isinstance(r, dict) and 'message' in r
+    finally:
+        module.Rejection = orig_rej
+
+
+def test_reload_module_without_contracts_api_import_falls_back():
+    import sys, importlib, builtins
+    module_name = 'contracts.personal_loan'
+    # Save original import
+    orig_import = builtins.__import__
+    def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == 'contracts_api' or name.startswith('contracts_api.'):
+            raise ModuleNotFoundError('simulate missing')
+        return orig_import(name, globals, locals, fromlist, level)
+
+    # Remove module so reload will re-execute top-level
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+
+    builtins.__import__ = fake_import
+    try:
+        mod = importlib.import_module(module_name)
+        # In fallback path, CustomInstruction should be set to object type
+        assert getattr(mod, 'CustomInstruction', None) in (object,)
+    finally:
+        # Restore import and reload original module to avoid side effects
+        builtins.__import__ = orig_import
+        if module_name in sys.modules:
+            del sys.modules[module_name]
+        importlib.import_module(module_name)
