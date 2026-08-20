@@ -156,24 +156,233 @@ def activation_hook(hook_arguments):
     return None
 
 
+def _build_rejection(message: str, reason_code=None):
+    """Construct a Rejection object when available, otherwise return a dict."""
+    try:
+        # contracts_api.Rejection expects message and reason_code in the Vault SDK
+        return Rejection(message=message, reason_code=reason_code)
+    except Exception:
+        return {'message': message, 'reason_code': reason_code}
+
+
+def _build_preposting_result(rejection_obj=None, instruction=None):
+    """Construct PrePostingHookResult or a compatible dict fallback."""
+    try:
+        if rejection_obj is not None:
+            return PrePostingHookResult(rejection=rejection_obj)
+        if instruction is not None:
+            # Returning an instruction from pre_posting_code is acceptable in some SDKs
+            return instruction
+        return None
+    except Exception:
+        # Fallback representation
+        return {'rejection': rejection_obj, 'instruction': instruction}
+
+
+def _build_custom_instruction(postings, details=None):
+    """Construct a CustomInstruction or dict fallback."""
+    try:
+        if details is None:
+            details = {}
+        return CustomInstruction(postings=postings, instruction_details=details)
+    except Exception:
+        return {'postings': postings, 'instruction_details': details}
+
+
+def _calculate_penalty(amount: Decimal, penalty_config):
+    """Compute penalty amount given a config {type: 'percent'|'fixed', value: Decimal}.
+
+    Returns a Decimal penalty quantized to 2 decimals.
+    """
+    if not penalty_config:
+        return Decimal('0.00')
+    ptype = penalty_config.get('type') if isinstance(penalty_config, dict) else None
+    pvalue = Decimal(penalty_config.get('value')) if isinstance(penalty_config, dict) and penalty_config.get('value') is not None else Decimal('0')
+
+    if ptype == 'percent':
+        penalty = (amount * (pvalue / Decimal('100')))
+    else:
+        # default to fixed
+        penalty = pvalue
+
+    return _quantize(Decimal(penalty))
+
+
+def _extract_value(obj, *names, default=None):
+    """Safe extractor: try attribute access then dict keys for each name in order."""
+    for name in names:
+        # attribute
+        try:
+            val = getattr(obj, name)
+            if val is not None:
+                return val
+        except Exception:
+            pass
+        # dict-style
+        try:
+            val = obj[name]
+            if val is not None:
+                return val
+        except Exception:
+            pass
+    return default
+
+
 def scheduled_event_hook(hook_arguments):
-    """Run scheduled amortization events (monthly)."""
-    # TODO: Compute current schedule entry and return postings to apply interest+principal
-    return None
+    """Run scheduled amortization events (monthly).
+
+    This implementation is conservative and runtime-agnostic: it attempts to
+    read product parameters (principal, interest_rate, term_months, denomination)
+    from common locations inside hook_arguments. If insufficient data is
+    available it becomes a no-op (returns None).
+
+    When it can determine the next payment period it builds a CustomInstruction
+    with postings for interest and principal for that period and returns it.
+    The Vault runtime can accept CustomInstruction or list of postings
+    depending on the SDK; a dict fallback is returned when SDK classes are
+    unavailable (useful for unit tests that inspect the returned structure).
+    """
+    # Attempt to read commonly named parameters
+    principal = _extract_value(hook_arguments, 'principal', 'amount', 'product_principal')
+    annual_rate = _extract_value(hook_arguments, 'interest_rate', 'annual_rate', 'rate')
+    term_months = _extract_value(hook_arguments, 'term_months', 'term', 'months')
+    denomination = _extract_value(hook_arguments, 'denomination', 'denom', 'currency', default='GBP')
+
+    # If any required parameter is missing, do nothing
+    if principal is None or annual_rate is None or term_months is None:
+        return None
+
+    # Normalize
+    principal = Decimal(principal)
+    annual_rate = Decimal(annual_rate)
+    term_months = int(term_months)
+
+    schedule = _calculate_schedule(principal, annual_rate, term_months, denomination)
+
+    # Determine which period to execute. Many runtimes provide an explicit
+    # period/index; try to extract it. Fallback to 1 (first unpaid period).
+    period = _extract_value(hook_arguments, 'period', 'payment_period', 'next_period', default=1)
+    try:
+        period = int(period)
+    except Exception:
+        period = 1
+
+    if period < 1 or period > len(schedule):
+        # Nothing to do or invalid period
+        return None
+
+    entry = schedule[period - 1]
+
+    # Build postings for interest and principal. The exact Posting shape comes
+    # from the Vault SDK; construct a best-effort dict or SDK Posting when
+    # available. Posting fields here are illustrative: account, amount, denomination, narrative
+    interest_posting = {
+        'amount': str(entry['interest_due']),
+        'denomination': denomination,
+        'narrative': f'Interest period {period}',
+        'type': 'interest',
+    }
+    principal_posting = {
+        'amount': str(entry['principal_due']),
+        'denomination': denomination,
+        'narrative': f'Principal repayment period {period}',
+        'type': 'principal',
+    }
+
+    postings = [interest_posting, principal_posting]
+
+    details = {
+        'description': f'Monthly amortization period {period}',
+    }
+
+    return _build_custom_instruction(postings, details)
 
 
 def pre_posting_code(hook_arguments):
     """Validate and process prepayments submitted by clients.
 
-    Should return a PrePostingHookResult with rejection when invalid, or None/empty
-    to allow posting to continue. When applying penalties, construct the
-    appropriate postings or CustomInstruction.
+    This function attempts to find a prepayment request in hook_arguments in
+    a few common locations. If found it validates denomination and amount
+    against the provided balance (if available) and computes/apply the penalty
+    according to a penalty configuration. If invalid, returns a
+    PrePostingHookResult with a Rejection; otherwise returns a CustomInstruction
+    containing postings that apply the penalty and reduce the principal.
     """
-    # TODO: Validate denomination, amount, calculate penalty, generate postings
-    # Example (pseudocode):
-    # if invalid:
-    #     return PrePostingHookResult(rejection=Rejection(message="...", reason_code=RejectionReason.INCOMPATIBLE_AMOUNT))
-    return None
+    # Try to find a declared 'prepayment' payload
+    prepayment = _extract_value(hook_arguments, 'prepayment', 'prepay', 'payload', default=None)
+
+    # If not found, look for postings that indicate a prepayment by convention
+    if prepayment is None:
+        # Some runtimes pass posting instructions directly
+        postings_in = _extract_value(hook_arguments, 'postings', 'posting', 'postings_in', default=None)
+        if postings_in:
+            # Heuristic: if any posting has a 'type' or 'narrative' mentioning 'prepay'
+            for p in postings_in:
+                try:
+                    narrative = p.get('narrative', '')
+                    ptype = p.get('type', '')
+                except Exception:
+                    narrative = ''
+                    ptype = ''
+                if 'prepay' in narrative.lower() or 'prepay' in str(ptype).lower():
+                    prepayment = p
+                    break
+
+    if prepayment is None:
+        # No prepayment detected — nothing to validate
+        return None
+
+    # Extract amount and denom
+    amount = _extract_value(prepayment, 'amount', 'value', 'principal_amount', default=None)
+    denom = _extract_value(prepayment, 'denomination', 'denom', 'currency', default=None)
+
+    if amount is None:
+        return None
+
+    amount = Decimal(amount)
+
+    # Get current outstanding principal if available
+    current_balance = _extract_value(hook_arguments, 'outstanding_principal', 'current_balance', 'balance', default=None)
+    if current_balance is not None:
+        try:
+            current_balance = Decimal(current_balance)
+        except Exception:
+            current_balance = None
+
+    # Get penalty configuration from parameters or product config
+    penalty_cfg = _extract_value(hook_arguments, 'prepayment_penalty', 'penalty', 'prepay_penalty', default=None)
+
+    # Validate denomination if product denomination exists
+    product_denom = _extract_value(hook_arguments, 'denomination', 'denom', 'product_denom', default=None)
+    if product_denom is not None and denom is not None and str(denom) != str(product_denom):
+        rejection = _build_rejection(f'Prepayment in incorrect denomination: {denom} (expected {product_denom})', reason_code=getattr(RejectionReason, 'INCOMPATIBLE_AMOUNT', None))
+        return _build_preposting_result(rejection_obj=rejection)
+
+    # Validate amount does not exceed outstanding principal (if known)
+    if current_balance is not None and amount > current_balance:
+        rejection = _build_rejection('Prepayment amount exceeds outstanding principal', reason_code=getattr(RejectionReason, 'INSUFFICIENT_FUNDS', None))
+        return _build_preposting_result(rejection_obj=rejection)
+
+    # Compute penalty
+    penalty_amount = _calculate_penalty(amount, penalty_cfg)
+
+    # Build postings: penalty (fee) and principal reduction
+    penalty_posting = {
+        'amount': str(penalty_amount),
+        'denomination': denom or product_denom or 'GBP',
+        'narrative': 'Prepayment penalty',
+        'type': 'penalty',
+    }
+    principal_reduction_posting = {
+        'amount': str(_quantize(amount)),
+        'denomination': denom or product_denom or 'GBP',
+        'narrative': 'Prepayment principal reduction',
+        'type': 'prepayment_principal',
+    }
+
+    instruction = _build_custom_instruction([penalty_posting, principal_reduction_posting], details={'description': 'Apply prepayment and penalty'})
+
+    return _build_preposting_result(instruction=instruction)
 
 
 def post_posting_code(hook_arguments):
