@@ -87,12 +87,11 @@ fi
 
 # ── Load review task template ─────────────────────────────────
 REVIEW_TEMPLATE=""
-REVIEW_CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/review-pr.md"
+REVIEW_CMD_FILE=$(os_command_template_path review)
 if [ -f "$REVIEW_CMD_FILE" ]; then
-  REVIEW_TEMPLATE=$(cat "$REVIEW_CMD_FILE" \
-    | sed "s|\$ARGUMENTS|$PR_NUMBER|g" \
-    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
-    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g")
+  REVIEW_TEMPLATE=$(os_substitute_command_template "$REVIEW_CMD_FILE" "$PR_NUMBER")
+else
+  os_warn "Review template not found: $REVIEW_CMD_FILE"
 fi
 
 # ── Build prompt ─────────────────────────────────────────────
@@ -115,6 +114,7 @@ $PR_BODY
 
 ## Active Stack
 Stack    : $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+Lint     : $OS_LINT_CMD
 Test     : $OS_TEST_CMD
 Coverage : $OS_COVERAGE_CMD
 

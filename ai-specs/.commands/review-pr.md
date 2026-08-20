@@ -1,5 +1,8 @@
 # review-pr
 
+> **Note:** When active stack is `vault-smart-contracts`, OpenSpec uses
+> `review-vault-pr.md` instead of this template.
+
 PR Number: $ARGUMENTS
 
 ## Goal

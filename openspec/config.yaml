@@ -86,11 +86,11 @@ stacks:
 
   vault-smart-contracts:
     label: Thought Machine Vault Smart Contracts
-    build_command: pip install -r requirements.txt
-    test_command: python -m pytest tests/ -v
-    run_command: vault-contract-validator validate contracts/
-    lint_command: ruff check . && mypy contracts/
-    coverage_command: pytest --cov=contracts --cov-report=html
+    build_command: pip install -r requirements.txt && pip install contracts_sdk/contracts_sdk/.
+    test_command: python .openspec-cli/lib/vault_lint.py contracts/ && python -m pytest tests/ -v
+    run_command: python .openspec-cli/lib/vault_lint.py contracts/
+    lint_command: python .openspec-cli/lib/vault_lint.py contracts/
+    coverage_command: python .openspec-cli/lib/vault_lint.py contracts/ && python -m pytest tests/ -v --cov=contracts --cov-report=html --cov-fail-under=90
     agent: ai-specs/.agents/stacks/vault-smart-contracts.md
     standards: ai-specs/specs/stacks/vault-smart-contracts-standards.mdc
 # ─────────────────────────────────────────────
