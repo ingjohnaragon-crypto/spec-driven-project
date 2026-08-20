@@ -77,127 +77,30 @@ os_build_pr_body() {
   _ticket="$1"
   _staged="$2"
   _lang="${3:-es}"
-
-  _plan="$(os_ticket_plan_file "$_ticket")"
-  _enrich="$(os_ticket_enrich_file "$_ticket")"
-  _points=""
-  [ -n "$_plan" ] && _points="$(os_md_story_points "$_plan")"
-  [ -z "$_points" ] && [ -n "$_enrich" ] && _points="$(os_md_story_points "$_enrich")"
-
-  _plan_title=""
-  if [ -n "$_plan" ]; then
-    _plan_title="$(head -1 "$_plan" | sed 's/^#[[:space:]]*//')"
-  fi
-
-  _resumen=""
-  if [ -n "$_plan" ]; then
-    _resumen="$(os_md_section "$_plan" "## 1. Resumen")"
-  fi
-  if [ -z "$_resumen" ] && [ -n "$_enrich" ]; then
-    _resumen="$(os_md_section "$_enrich" "## Descripción mejorada")"
-  fi
-
-  _decisiones=""
-  if [ -n "$_plan" ]; then
-    _decisiones="$(os_md_section "$_plan" "### 2.1 Decisiones")"
-  fi
-
-  _aceptacion=""
-  if [ -n "$_enrich" ]; then
-    _aceptacion="$(os_md_section "$_enrich" "## Criterios de aceptación")"
-  fi
-
-  _contracts="$(printf '%s\n' "$_staged" | grep -E '^contracts/.*\.py$' | sed 's/^/- /' || true)"
-  _tests="$(printf '%s\n' "$_staged" | grep -E '^tests/' | sed 's/^/- /' || true)"
-  _docs="$(printf '%s\n' "$_staged" | grep -E '^ai-specs/changes/(planes|enriquecimientos)/' | sed 's/^/- /' || true)"
-  _tooling="$(printf '%s\n' "$_staged" | grep -E '^(\.openspec-cli/|ai-specs/\.commands/)' | sed 's/^/- /' || true)"
-
-  _contracts_block="$(os_bullet_or_none "$_contracts")"
-  _tests_block="$(os_bullet_or_none "$_tests")"
-  _docs_block="$(os_bullet_or_none "$_docs")"
-  _tooling_block="$(os_bullet_or_none "$_tooling")"
-  _jira_url="${JIRA_BASE_URL:-}/browse/${_ticket}"
-
-  if [ "$_lang" = "es" ]; then
-    printf '%s\n' "## Resumen"
-    printf '%s\n' "${_plan_title:-Implementa $_ticket}"
-    printf '\n'
-    printf '%s\n' "Stack: \`$OS_ACTIVE_STACK\` ($OS_STACK_LABEL)"
-    [ -n "$_points" ] && printf '%s\n' "Story points: **$_points**"
-    printf '\n'
-    printf '%s\n' "${_resumen:-Implementa $_ticket en el stack activo.}"
-    printf '\n'
-    printf '%s\n' "## Decisiones clave"
-    printf '%s\n' "${_decisiones:-_(ver plan de implementación)_}"
-    printf '\n'
-    printf '%s\n' "## Criterios de aceptación"
-    printf '%s\n' "${_aceptacion:-_(ver enriquecimiento)_}"
-    printf '\n'
-    printf '%s\n' "## Contratos"
-    printf '%s\n' "$_contracts_block"
-    printf '\n'
-    printf '%s\n' "## Tests"
-    printf '%s\n' "$_tests_block"
-    printf '\n'
-    printf '%s\n' "## Documentación (plan / enriquecimiento)"
-    printf '%s\n' "$_docs_block"
-    printf '\n'
-    printf '%s\n' "## Tooling / templates"
-    printf '%s\n' "$_tooling_block"
-    printf '\n'
-    printf '%s\n' "## Checklist"
-    printf '%s\n' "- [ ] Tests pasan (\`os-vault-test\` / \`$OS_TEST_CMD\`)"
-    printf '%s\n' "- [ ] Cobertura >= 90% (\`$OS_COVERAGE_CMD\`)"
-    printf '%s\n' "- [ ] Plan y enriquecimiento versionados en \`ai-specs/changes/\`"
-    printf '%s\n' "- [ ] El contrato respeta las restricciones del sandbox Vault"
-    printf '\n'
-    printf '%s\n' "## Referencias"
-    [ -n "$_plan" ] && printf '%s\n' "- Plan: \`ai-specs/changes/planes/${_ticket}/${_ticket}_backend.md\`"
-    [ -n "$_enrich" ] && printf '%s\n' "- Enriquecimiento: \`ai-specs/changes/enriquecimientos/${_ticket}/\`"
-    printf '%s\n' "- Jira: [${_ticket}](${_jira_url})"
+  _builder=""
+  if [ -f "$OS_REPO_ROOT/.openspec-cli/lib/build_pr_body.py" ]; then
+    _builder="$OS_REPO_ROOT/.openspec-cli/lib/build_pr_body.py"
+  elif [ -f "$HOME/.openspec/lib/build_pr_body.py" ]; then
+    _builder="$HOME/.openspec/lib/build_pr_body.py"
   else
-    printf '%s\n' "## Summary"
-    printf '%s\n' "${_plan_title:-Implements $_ticket}"
-    printf '\n'
-    printf '%s\n' "Stack: \`$OS_ACTIVE_STACK\` ($OS_STACK_LABEL)"
-    [ -n "$_points" ] && printf '%s\n' "Story points: **$_points**"
-    printf '\n'
-    printf '%s\n' "${_resumen:-Implements $_ticket on the active stack.}"
-    printf '\n'
-    printf '%s\n' "## Key decisions"
-    printf '%s\n' "${_decisiones:-_(see implementation plan)_}"
-    printf '\n'
-    printf '%s\n' "## Acceptance criteria"
-    printf '%s\n' "${_aceptacion:-_(see enrichment)_}"
-    printf '\n'
-    printf '%s\n' "## Contracts"
-    printf '%s\n' "$_contracts_block"
-    printf '\n'
-    printf '%s\n' "## Tests"
-    printf '%s\n' "$_tests_block"
-    printf '\n'
-    printf '%s\n' "## Documentation (plan / enrichment)"
-    printf '%s\n' "$_docs_block"
-    printf '\n'
-    printf '%s\n' "## Tooling / templates"
-    printf '%s\n' "$_tooling_block"
-    printf '\n'
-    printf '%s\n' "## Checklist"
-    printf '%s\n' "- [ ] Tests pass (\`os-vault-test\` / \`$OS_TEST_CMD\`)"
-    printf '%s\n' "- [ ] Coverage >= 90% (\`$OS_COVERAGE_CMD\`)"
-    printf '%s\n' "- [ ] Plan and enrichment versioned under \`ai-specs/changes/\`"
-    printf '%s\n' "- [ ] Contract respects Vault Python sandbox restrictions"
-    printf '\n'
-    printf '%s\n' "## References"
-    [ -n "$_plan" ] && printf '%s\n' "- Plan: \`ai-specs/changes/planes/${_ticket}/${_ticket}_backend.md\`"
-    [ -n "$_enrich" ] && printf '%s\n' "- Enrichment: \`ai-specs/changes/enriquecimientos/${_ticket}/\`"
-    printf '%s\n' "- Jira: [${_ticket}](${_jira_url})"
+    os_error "build_pr_body.py not found. Re-run: sh .openspec-cli/install.sh"
+    return 1
   fi
+  _tmp="$(mktemp)"
+  printf '%s\n' "$_staged" | tr -d '\r' > "$_tmp"
+  "${OS_PYTHON:-py}" -X utf8 "$_builder" \
+    "$_ticket" \
+    --lang "$_lang" \
+    --staged-file "$_tmp" \
+    --repo-root "$OS_REPO_ROOT"
+  _rc=$?
+  rm -f "$_tmp"
+  return $_rc
 }
 
 os_build_commit_body() {
   _ticket="$1"
-  _staged="$2"
+  _staged="$(printf '%s' "$2" | tr -d '\r')"
   _lang="${3:-es}"
   _file_count=$(printf '%s\n' "$_staged" | sed '/^$/d' | wc -l | tr -d ' ')
 
