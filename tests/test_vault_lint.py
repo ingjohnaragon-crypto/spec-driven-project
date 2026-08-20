@@ -213,19 +213,62 @@ def test_violation_str_format(tmp_path: Path) -> None:
     assert ":1" in text
 
 
+# ── API 4.0 style rules ───────────────────────────────────────
+
+
+def test_should_fail_when_contract_uses_float_literal(tmp_path: Path) -> None:
+    violations = lint_source(tmp_path, "amount = 100.00\n")
+    assert any(v.rule == "FLOAT_USED" for v in violations)
+
+
+def test_should_fail_when_contract_calls_float(tmp_path: Path) -> None:
+    violations = lint_source(tmp_path, "amount = float('1.5')\n")
+    assert any(v.rule == "FLOAT_USED" for v in violations)
+
+
+def test_should_fail_when_contract_uses_timezone_utc(tmp_path: Path) -> None:
+    violations = lint_source(tmp_path, "dt = timezone.utc\n")
+    assert len(violations) == 1
+    assert violations[0].rule == "TIMEZONE_UTC"
+
+
+def test_should_fail_when_contract_uses_client_transaction_id(tmp_path: Path) -> None:
+    code = "CustomInstruction(postings=[], client_transaction_id='x')\n"
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "CLIENT_TRANSACTION_ID" for v in violations)
+
+
+def test_should_fail_when_phase_read_from_balance_value(tmp_path: Path) -> None:
+    code = "if balance.phase == Phase.COMMITTED:\n    pass\n"
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "PHASE_ON_BALANCE" for v in violations)
+
+
+def test_should_allow_zoneinfo_import(tmp_path: Path) -> None:
+    violations = lint_source(tmp_path, "from zoneinfo import ZoneInfo\n")
+    assert violations == []
+
+
 # ── main() exit codes ─────────────────────────────────────────
 
 
-def test_main_should_return_0_when_no_violations(tmp_path: Path) -> None:
+def test_main_should_return_0_when_no_violations(tmp_path: Path, capsys) -> None:
     p = _write(tmp_path, "x = 1\n")
     result = main([str(p)])
     assert result == 0
+    out = capsys.readouterr().out
+    assert "Checking Vault sandbox restrictions..." in out
+    assert "✔ No stdlib imports detected" in out
+    assert "✔ 7/7 Vault rules — CLEAN" in out
 
 
-def test_main_should_return_1_when_violations_found(tmp_path: Path) -> None:
+def test_main_should_return_1_when_violations_found(tmp_path: Path, capsys) -> None:
     p = _write(tmp_path, "import os\n")
     result = main([str(p)])
     assert result == 1
+    out = capsys.readouterr().out
+    assert "✖ No stdlib imports detected" in out
+    assert "Vault rules — FAILED" in out
 
 
 def test_main_should_return_1_when_target_not_found(tmp_path: Path) -> None:
@@ -235,5 +278,10 @@ def test_main_should_return_1_when_target_not_found(tmp_path: Path) -> None:
 
 def test_main_should_lint_directory_when_target_is_dir(tmp_path: Path) -> None:
     _write(tmp_path, "import os\n", "bad.py")
+    result = main([str(tmp_path)])
+    assert result == 1
+
+
+def test_main_should_return_1_when_directory_has_no_py_files(tmp_path: Path) -> None:
     result = main([str(tmp_path)])
     assert result == 1
