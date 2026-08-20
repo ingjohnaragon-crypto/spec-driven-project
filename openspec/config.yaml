@@ -13,6 +13,14 @@ stack: vault-smart-contracts
 agent: claude-code
 
 # ─────────────────────────────────────────────
+# ACTIVE LANGUAGE
+# Output language for everything the framework generates:
+# code, comments, docs, Jira content, commits, PR titles/bodies.
+# Change with: os-language <code>
+# ─────────────────────────────────────────────
+language: en
+
+# ─────────────────────────────────────────────
 # STACK REGISTRY
 # ─────────────────────────────────────────────
 stacks:
@@ -118,6 +126,17 @@ agents:
     delivery: cli
     command: aider
     args: --message
+
+
+# ─────────────────────────────────────────────
+# LANGUAGE REGISTRY
+# ─────────────────────────────────────────────
+languages:
+  en:
+    label: English
+
+  es:
+    label: Español (Spanish)
 
 
 # ─────────────────────────────────────────────

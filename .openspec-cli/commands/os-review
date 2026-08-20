@@ -8,6 +8,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/agent.sh"
+. "$CLI_DIR/lib/language.sh"
 
 if [ -z "$PR_NUMBER" ]; then
   os_error "Usage: os-review <PR-NUMBER>"
@@ -22,7 +23,9 @@ fi
 os_load_config
 os_load_env
 os_load_agent
+os_load_language
 os_print_config
+os_print_language
 
 # ── Fetch PR metadata ────────────────────────────────────────
 os_step "Fetching PR #$PR_NUMBER metadata..."
@@ -73,8 +76,13 @@ BASE_STANDARDS="";   BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
 PLAN_CONTENT=""
 TICKET_ID=$(echo "$PR_BRANCH" | grep -oE '[A-Z]+-[0-9]+' | head -1 || true)
 if [ -n "$TICKET_ID" ]; then
-  PLAN_FILE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
-  [ -f "$PLAN_FILE" ] && PLAN_CONTENT=$(cat "$PLAN_FILE")
+  PLAN_FILE="$OS_REPO_ROOT/ai-specs/changes/planes/${TICKET_ID}/${TICKET_ID}_backend.md"
+  LEGACY_PLAN="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
+  if [ -f "$PLAN_FILE" ]; then
+    PLAN_CONTENT=$(cat "$PLAN_FILE")
+  elif [ -f "$LEGACY_PLAN" ]; then
+    PLAN_CONTENT=$(cat "$LEGACY_PLAN")
+  fi
 fi
 
 # ── Load review task template ─────────────────────────────────
@@ -92,6 +100,10 @@ os_step "Building review prompt..."
 
 PROMPT="You are an expert code reviewer for an openspec project.
 Review the following Pull Request against the active stack standards.
+
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
 
 ## PR #$PR_NUMBER — $PR_TITLE
 Author  : $PR_AUTHOR
@@ -141,53 +153,19 @@ $REVIEW_TEMPLATE"
 PROMPT_FILE="$OS_REPO_ROOT/.openspec-cli/.last-prompt.md"
 OUTPUT_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
 printf '%s' "$PROMPT" > "$PROMPT_FILE"
-
-CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
-mkdir -p "$CHANGES_DIR"
-if [ -n "$TICKET_ID" ]; then
-  REVIEW_ARCHIVE="$CHANGES_DIR/${TICKET_ID}_review.md"
-else
-  REVIEW_ARCHIVE="$CHANGES_DIR/pr-${PR_NUMBER}_review.md"
-fi
+rm -f "$OUTPUT_FILE"
 
 os_divider
 
-# ── Deliver and capture output ────────────────────────────────
-if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
-  os_step "Sending review prompt to $OS_AGENT_LABEL..."
-  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE" > "$OUTPUT_FILE" 2>/dev/null
-  cp "$OUTPUT_FILE" "$REVIEW_ARCHIVE"
-  os_success "Review saved!"
-  os_info "Working : .openspec-cli/.review-output.md"
-  os_info "Archive : $REVIEW_ARCHIVE"
-  os_divider
-  os_info "Preview (first 15 lines):"
-  head -15 "$OUTPUT_FILE"
-  os_divider
-  os_info "Next step: os-review-apply $PR_NUMBER"
-else
-  printf '%s' "$PROMPT" | clip 2>/dev/null || true
-  os_success "Prompt copied to clipboard!"
-  os_info "1. Paste in $OS_AGENT_LABEL"
-  os_info "2. Copy the review output"
-  os_info "3. Press Enter here when ready..."
-  read -r _dummy
-  os_step "Paste the review (CTRL+Z + Enter to finish on Windows):"
-  OUTPUT=""
-  while IFS= read -r line 2>/dev/null; do
-    OUTPUT="${OUTPUT}${line}
-"
-  done
-  printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
-  cp "$OUTPUT_FILE" "$REVIEW_ARCHIVE"
-  os_success "Review saved!"
-  os_info "Working : .openspec-cli/.review-output.md"
-  os_info "Archive : $REVIEW_ARCHIVE"
-  os_divider
-  os_info "Preview (first 15 lines):"
-  head -15 "$OUTPUT_FILE"
-  os_divider
-  os_info "Next step: os-review-apply $PR_NUMBER"
-fi
+# ── Deliver and capture output (temp working file only — GitHub is the archive) ──
+os_deliver_prompt_capture "$PROMPT_FILE" "$OUTPUT_FILE"
+os_success "Review saved!"
+os_info "Working : .openspec-cli/.review-output.md"
+os_info "Note    : Reviews are published to GitHub via os-review-apply (no local archive)"
+os_divider
+os_info "Preview (first 15 lines):"
+head -15 "$OUTPUT_FILE"
+os_divider
+os_info "Next step: os-review-apply $PR_NUMBER"
 
 os_divider

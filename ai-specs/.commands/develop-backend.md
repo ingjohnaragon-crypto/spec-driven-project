@@ -12,7 +12,7 @@ Analyze and implement the Jira ticket: $ARGUMENTS
 2. Load and internalize the resolved stack agent and standards files
 3. Read `ai-specs/specs/base-standards.mdc`
 4. Read `ai-specs/specs/documentation-standards.mdc`
-5. If a plan already exists at `ai-specs/changes/<ticket-id>_backend.md`, read it before starting
+5. If a plan already exists at `ai-specs/changes/planes/<ticket-id>/<ticket-id>_backend.md`, read it before starting
 
 ## Implementation steps
 
