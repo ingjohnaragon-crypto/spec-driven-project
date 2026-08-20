@@ -79,3 +79,41 @@ os_print_config() {
   os_info "Standards : $OS_STANDARDS_PATH"
   os_divider
 }
+
+# Resolve ai-specs/.commands template path for plan | develop | review
+os_command_template_path() {
+  _kind="$1"
+  case "${OS_ACTIVE_STACK:-}" in
+    vault-smart-contracts)
+      case "$_kind" in
+        plan)    _base="plan-vault-contract" ;;
+        develop) _base="develop-vault-contract" ;;
+        review)  _base="review-vault-pr" ;;
+        *)       return 1 ;;
+      esac
+      ;;
+    *)
+      case "$_kind" in
+        plan)    _base="plan-backend-ticket" ;;
+        develop) _base="develop-backend" ;;
+        review)  _base="review-pr" ;;
+        *)       return 1 ;;
+      esac
+      ;;
+  esac
+  echo "$OS_REPO_ROOT/ai-specs/.commands/${_base}.md"
+}
+
+# Load a command template with tooling placeholders substituted
+os_substitute_command_template() {
+  _file="$1"
+  _arg="${2:-}"
+  [ -f "$_file" ] || return 1
+  cat "$_file" \
+    | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
+    | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
+    | sed "s|\$ARGUMENTS|$_arg|g"
+}

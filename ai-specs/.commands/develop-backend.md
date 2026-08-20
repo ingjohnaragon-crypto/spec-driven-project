@@ -1,5 +1,8 @@
 # develop-backend
 
+> **Note:** When active stack is `vault-smart-contracts`, OpenSpec uses
+> `develop-vault-contract.md` instead of this template.
+
 Analyze and implement the Jira ticket: $ARGUMENTS
 
 ## Pre-flight checklist (run before writing any code)
