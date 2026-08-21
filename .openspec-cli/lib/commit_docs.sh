@@ -72,8 +72,9 @@ os_stage_ticket_docs() {
   fi
 }
 
-# Build a detailed PR body from plan + enrichment + staged files
-os_build_pr_body() {
+# Build PR body to a UTF-8 file and print its path (never echo body to the shell).
+# Usage: PR_BODY_FILE="$(os_build_pr_body_file TICKET STAGED LANG)"
+os_build_pr_body_file() {
   _ticket="$1"
   _staged="$2"
   _lang="${3:-es}"
@@ -86,16 +87,25 @@ os_build_pr_body() {
     os_error "build_pr_body.py not found. Re-run: sh .openspec-cli/install.sh"
     return 1
   fi
-  _tmp="$(mktemp)"
-  printf '%s\n' "$_staged" | tr -d '\r' > "$_tmp"
+  _staged_tmp="$(mktemp)"
+  _out="$OS_REPO_ROOT/.openspec-cli/.pr-body.md"
+  printf '%s\n' "$_staged" | tr -d '\r' > "$_staged_tmp"
   "${OS_PYTHON:-py}" -X utf8 "$_builder" \
     "$_ticket" \
     --lang "$_lang" \
-    --staged-file "$_tmp" \
-    --repo-root "$OS_REPO_ROOT"
+    --staged-file "$_staged_tmp" \
+    --repo-root "$OS_REPO_ROOT" \
+    --output "$_out"
   _rc=$?
-  rm -f "$_tmp"
-  return $_rc
+  rm -f "$_staged_tmp"
+  [ "$_rc" -eq 0 ] || return "$_rc"
+  printf '%s\n' "$_out"
+}
+
+# Back-compat: stdout body (avoid on Windows — use os_build_pr_body_file)
+os_build_pr_body() {
+  _file="$(os_build_pr_body_file "$@")" || return 1
+  cat "$_file"
 }
 
 os_build_commit_body() {

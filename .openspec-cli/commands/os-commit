@@ -291,38 +291,44 @@ os_step "Creating Pull Request → develop..."
 
 # If a PR already exists for this branch, update its body instead of failing create
 EXISTING_PR=$(gh pr view --json number,url -q '.number' 2>/dev/null || true)
+PR_BODY_FILE="$OS_REPO_ROOT/.openspec-cli/.pr-body.md"
 
 if [ -n "$TICKET_ID" ]; then
   PR_TITLE="[$TICKET_ID] $SUBJECT"
-  PR_BODY="$(os_build_pr_body "$TICKET_ID" "$STAGED" "$OS_ACTIVE_LANGUAGE")"
+  # Write UTF-8 body to file — never pass Spanish text via shell --body (mojibake on Windows)
+  PR_BODY_FILE="$(os_build_pr_body_file "$TICKET_ID" "$STAGED" "$OS_ACTIVE_LANGUAGE")"
 else
   PR_TITLE="$SUBJECT"
   if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
-    PR_BODY="## Resumen
-Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Rama: $CURRENT_BRANCH
-
-## Cambios
-$(echo "$STAGED" | sed 's/^/- /')"
+    {
+      echo "## Resumen"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Rama: $CURRENT_BRANCH"
+      echo ""
+      echo "## Cambios"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
   else
-    PR_BODY="## Summary
-Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Branch: $CURRENT_BRANCH
-
-## Changes
-$(echo "$STAGED" | sed 's/^/- /')"
+    {
+      echo "## Summary"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Branch: $CURRENT_BRANCH"
+      echo ""
+      echo "## Changes"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
   fi
 fi
 
 if [ -n "$EXISTING_PR" ]; then
   os_info "PR #$EXISTING_PR already exists — updating title/body..."
-  gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body "$PR_BODY" >/dev/null
+  gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body-file "$PR_BODY_FILE" >/dev/null
   PR_URL=$(gh pr view "$EXISTING_PR" --json url -q .url)
   os_success "Pull Request updated → develop"
 else
   PR_URL=$(gh pr create \
     --title "$PR_TITLE" \
-    --body "$PR_BODY" \
+    --body-file "$PR_BODY_FILE" \
     --head "$CURRENT_BRANCH" \
     --base "develop" 2>&1)
   os_success "Pull Request created → develop"

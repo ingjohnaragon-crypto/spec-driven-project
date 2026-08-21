@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop, chore/add-core-vault-spec]
+    branches: [main, master, develop]
   pull_request:
     branches: [main, master, develop]
 
@@ -31,11 +31,23 @@ jobs:
       - name: Run vault_lint unit tests
         run: pytest tests/test_vault_lint.py -v --cov=vault_lint --cov-fail-under=90
 
+      # Run ALL contract product tests. Measuring --cov=contracts while omitting a
+      # product's tests (e.g. personal_loan) drops total coverage below 90%.
       - name: Run Vault Smart Contract tests
-        run: pytest tests/test_savings_product.py tests/test_current_account.py tests/test_fixed_term_deposit.py -v --cov=contracts --cov-report=xml --cov-fail-under=90
+        run: >
+          pytest
+          tests/test_savings_product.py
+          tests/test_current_account.py
+          tests/test_fixed_term_deposit.py
+          tests/test_personal_loan.py
+          -v
+          --cov=contracts
+          --cov-report=xml
+          --cov-fail-under=90
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
+          if-no-files-found: ignore

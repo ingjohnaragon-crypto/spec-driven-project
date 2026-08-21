@@ -6,6 +6,17 @@ PR Number: $ARGUMENTS
 Review a Pull Request for Vault Smart Contract changes against sandbox rules,
 API 4.0 patterns, and test quality. Save to `.openspec-cli/.review-output.md` only.
 
+## Autonomy rules (mandatory)
+
+- **Do not ask the human questions.** Do not pause for product/design choices.
+- Treat plan §2.1 (Decisiones bloqueadas) as **final**. Do not re-open those decisions.
+- If something is ambiguous, **choose the option that matches** `contracts/fixed_term_deposit.py`
+  + the locked plan, note it briefly under Summary, and continue.
+- Always produce a complete review with a **Final Verdict** line.
+- Always write the full markdown review to `.openspec-cli/.review-output.md`.
+- Your last chat message must be ONLY the confirmation that the file was saved
+  (see Final message format) — never a question.
+
 ## Pre-flight checklist
 
 1. Load stack agent and `ai-specs/specs/stacks/vault-smart-contracts-standards.mdc`
@@ -23,11 +34,13 @@ API 4.0 patterns, and test quality. Save to `.openspec-cli/.review-output.md` on
 5. **Security** — no secrets in contract/test code
 
 ### Sandbox checklist
-- [ ] Only `contracts_api` and `decimal` imports in `contracts/*.py`
+- [ ] Only `contracts_api` and `decimal` (and `zoneinfo` if needed) imports in `contracts/*.py`
 - [ ] No `eval`, `print`, `open`, `getattr`, `type`, `globals`, `locals`
 - [ ] Module-level lists only on allowed names (`supported_denominations`, `parameters`, …)
 - [ ] No `raise X from Y`
 - [ ] No mutable global counters/caches between hooks
+- [ ] No float literals / `float()` for money; no `timezone.utc`; no `client_transaction_id`
+- [ ] Phase read from `BalanceCoordinate`, not from `Balance`
 
 ### API 4.0 checklist
 - [ ] `PrePostingHookArguments` / `PostPostingHookArguments` include `client_transactions={}`
@@ -44,7 +57,7 @@ API 4.0 patterns, and test quality. Save to `.openspec-cli/.review-output.md` on
 - [ ] `supported_denominations` declared at module level; instance param uses `DenominationShape`
 - [ ] Wrong-currency postings rejected with appropriate `RejectionReason` (e.g. `WRONG_DENOMINATION`)
 - [ ] Internal transfers credit correct account addresses (not customer `DEFAULT` for fees/income)
-- [ ] Hook signatures match API 4.0 types
+- [ ] Hook signatures match API 4.0 types (`activation_hook`, `pre_posting_hook`, …)
 
 ### Testing checklist
 - [ ] New/changed behaviour has unit tests in `tests/test_<product>.py`
@@ -59,6 +72,15 @@ API 4.0 patterns, and test quality. Save to `.openspec-cli/.review-output.md` on
 3. Note 2–3 positives
 4. Verdict: **APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**
 5. Save to `.openspec-cli/.review-output.md` — do not write under `ai-specs/changes/`
+
+## Verdict rules
+
+- **REQUEST CHANGES** if any CRITICAL issue exists (sandbox break, wrong API 4.0 pattern, missing required tests for new behaviour, coverage clearly < 90% on the changed contract).
+- **COMMENT ONLY** if only MAJOR/MINOR suggestions and the PR is otherwise shippable.
+- **APPROVE** if no CRITICAL/MAJOR issues and checklists pass.
+
+The review **must** end with a section `## Final Verdict` containing exactly one of:
+`**APPROVE**` / `**REQUEST CHANGES**` / `**COMMENT ONLY**`
 
 ## Language
 
@@ -83,7 +105,7 @@ Pass/fail per rule; cite file:line for violations.
 Pass/fail per pattern above.
 
 ### `## Contract Design`
-Parameters, hooks, postings, schedules — design assessment.
+Parameters, hooks, postings, schedules — design assessment against locked plan decisions.
 
 ### `## Testing`
 Coverage, test quality, missing cases.
@@ -95,6 +117,7 @@ Secrets, sensitive data in logs or contract metadata.
 ```
 - **File**: `contracts/foo.py` (line N) — **Severity**: CRITICAL — **Fix**: ...
 ```
+If none: `No specific issues found.`
 
 ### `## What's Done Well`
 2–3 highlights.
