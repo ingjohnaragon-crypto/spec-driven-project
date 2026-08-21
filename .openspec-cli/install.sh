@@ -158,18 +158,103 @@ success "OpenSpec CLI installed / refreshed successfully!"
 divider
 info "Reload your shell or run:  source ~/.bashrc"
 divider
-label "  Installed commands ($(printf '%s' "$INSTALLED_CMDS" | sed '/^$/d' | wc -l | tr -d ' ')):"
-printf '%s' "$INSTALLED_CMDS" | sed '/^$/d' | sort | while IFS= read -r c; do
-  info "  $c"
-done
+
+_has_cmd() {
+  printf '%s' "$INSTALLED_CMDS" | grep -qx "$1"
+}
+
+_print_cmd() {
+  # usage: _print_cmd <name> <usage> <description>
+  _has_cmd "$1" || return 0
+  info "  $1"
+  info "      $2"
+  info "      → $3"
+}
+
+label "  ── Setup / configuración ──"
+_print_cmd "os-stack" \
+  "os-stack [--list | <stack-name>]" \
+  "Activa o lista el stack (vault-smart-contracts, python-fastapi, …)"
+_print_cmd "os-agent" \
+  "os-agent [--list | <agent-name>]" \
+  "Activa o lista el agente (copilot, cursor, claude-code, …)"
+_print_cmd "os-language" \
+  "os-language [--list | <lang>]" \
+  "Cambia el idioma de salida (es / en)"
+
 divider
-label "  Vault extras:"
-info "  os-vault-lint / os-vault-test / os-vault-simulate / os-vault-deploy"
-info "  os-vault-account / os-vault-balances"
+label "  ── Jira ──"
+_print_cmd "os-tickets" \
+  "os-tickets [status] [--project KEY]" \
+  "Lista tickets del proyecto Jira"
+_print_cmd "os-create-ticket" \
+  "os-create-ticket [--hu] [--project KEY] [summary] [type]" \
+  "Crea un ticket (opción --hu genera HU con IA)"
+_print_cmd "os-enrich" \
+  "os-enrich <TICKET-ID>" \
+  "Enriquece el ticket con detalle técnico (prompt → archivo)"
+_print_cmd "os-enrich-apply" \
+  "os-enrich-apply <TICKET-ID> [file]" \
+  "Sube el enriquecimiento a Jira (+ story points si aplica)"
+_print_cmd "os-transition" \
+  "os-transition <TICKET-ID> [--list | <estado>]" \
+  "Mueve el ticket de estado en Jira"
+
 divider
-label "  Workflow:"
-info "  os-enrich → os-plan → os-develop → os-vault-test --coverage → os-commit"
-info "  os-review → os-review-apply → os-review-fix (if needed)"
+label "  ── Desarrollo (workflow) ──"
+_print_cmd "os-plan" \
+  "os-plan <TICKET-ID>" \
+  "Genera el plan de implementación (ai-specs/changes/planes/…)"
+_print_cmd "os-develop" \
+  "os-develop <TICKET-ID>" \
+  "Crea rama feature/… y entrega el prompt de implementación"
+_print_cmd "os-commit" \
+  "os-commit [TICKET-ID]" \
+  "Commit + push + PR → develop (incluye plan/enriquecimiento)"
+
 divider
-info "Re-run this installer after every pull on main to refresh copied commands/libs."
+label "  ── Code review (GitHub) ──"
+_print_cmd "os-review" \
+  "os-review <PR-NUMBER>" \
+  "Genera code review AI → .openspec-cli/.review-output.md"
+_print_cmd "os-review-apply" \
+  "os-review-apply <PR-NUMBER> [file]" \
+  "Publica el review en el PR (APPROVE / REQUEST CHANGES)"
+_print_cmd "os-review-fix" \
+  "os-review-fix <PR-NUMBER>" \
+  "Aplica fixes del review y re-genera re-review"
+
+divider
+label "  ── Vault Smart Contracts ──"
+_print_cmd "os-vault-lint" \
+  "os-vault-lint [contracts/ | file.py]" \
+  "Lint sandbox Vault (7 reglas: imports, float, ZoneInfo, …)"
+_print_cmd "os-vault-test" \
+  "os-vault-test [contracts/foo.py | tests/…] [--coverage]" \
+  "Lint + pytest; --coverage mide el contrato (>= 90%)"
+_print_cmd "os-vault-simulate" \
+  "os-vault-simulate <contract.py> [start] [end] [params_json]" \
+  "Simula el contrato contra Vault Core API"
+_print_cmd "os-vault-deploy" \
+  "os-vault-deploy <contract.py> <product_id> <name> [api]" \
+  "Despliega ProductVersion en Vault Core"
+_print_cmd "os-vault-account" \
+  "os-vault-account <product_version_id> <customer_id> [ccy]" \
+  "Crea cuenta de prueba ligada a un product version"
+_print_cmd "os-vault-balances" \
+  "os-vault-balances <account_id>" \
+  "Consulta balances en vivo de una cuenta Vault"
+
+divider
+label "  Flujo típico Vault"
+info "  1. os-enrich KAN-XX && os-enrich-apply KAN-XX"
+info "  2. os-plan KAN-XX"
+info "  3. os-develop KAN-XX"
+info "  4. os-vault-lint contracts/<product>.py"
+info "  5. os-vault-test contracts/<product>.py --coverage"
+info "  6. os-commit KAN-XX"
+info "  7. os-review <PR> && os-review-apply <PR>"
+divider
+info "Re-run after every git pull on main:"
+info "  sh .openspec-cli/install.sh && source ~/.bashrc"
 divider
