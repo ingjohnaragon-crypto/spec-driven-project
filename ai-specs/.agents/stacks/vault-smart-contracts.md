@@ -316,7 +316,7 @@ display_name = "Product Name"
 summary      = "One-line summary"
 description  = "Full description"
 tside        = Tside.LIABILITY
-supported_denominations = ["GBP"]
+supported_denominations = ["GBP", "USD", "EUR", "COP"]
 
 DEFAULT_ADDRESS = "DEFAULT"
 DEFAULT_ASSET   = "COMMERCIAL_BANK_MONEY"
@@ -332,7 +332,7 @@ parameters = [
     ),
     Parameter(
         name="denomination",
-        shape=DenominationShape(),
+        shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
         display_name="Denomination",
         default_value="GBP",
@@ -470,7 +470,7 @@ os-agent claude-code              # or copilot
 
 os-enrich KAN-15                  # enriches ticket with hooks + params
 os-enrich-apply KAN-15
-os-plan KAN-15                    # generates plan in ai-specs/changes/
+os-plan KAN-15                    # generates plan in ai-specs/changes/planes/
 os-develop KAN-15                 # creates branch + scaffold
 
 os-vault-test                     # run 18 tests locally with SDK

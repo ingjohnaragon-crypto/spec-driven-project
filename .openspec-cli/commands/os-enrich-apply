@@ -20,17 +20,21 @@ os_load_env
 os_require_jira_env
 
 ENRICHED_FILE="$OS_REPO_ROOT/.openspec-cli/.enriched-content.md"
-ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_enriched.md"
+ARCHIVE_FILE="$OS_REPO_ROOT/ai-specs/changes/enriquecimientos/${TICKET_ID}/${TICKET_ID}_enriched.md"
+LEGACY_ARCHIVE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_enriched.md"
 
 if [ -n "$CONTENT_FILE" ] && [ -f "$CONTENT_FILE" ]; then
   SOURCE_FILE="$CONTENT_FILE"
 elif [ -f "$ARCHIVE_FILE" ]; then
   SOURCE_FILE="$ARCHIVE_FILE"
+elif [ -f "$LEGACY_ARCHIVE" ]; then
+  SOURCE_FILE="$LEGACY_ARCHIVE"
+  os_info "Using legacy enrich path: $SOURCE_FILE"
 elif [ -f "$ENRICHED_FILE" ]; then
   SOURCE_FILE="$ENRICHED_FILE"
 else
   os_error "No enriched content file found."
-  os_info  "Expected at: ai-specs/changes/${TICKET_ID}_enriched.md"
+  os_info  "Expected at: ai-specs/changes/enriquecimientos/${TICKET_ID}/${TICKET_ID}_enriched.md"
   os_info  "Fallback  : .openspec-cli/.enriched-content.md"
   exit 1
 fi
@@ -53,8 +57,22 @@ case "$confirm" in
 esac
 
 os_step "Uploading to Jira $TICKET_ID..."
+os_info "ADF converter strips <!-- jira-skip --> blocks and uploads story points from <!-- STORY_POINTS:N -->"
+os_info "Override field with JIRA_STORY_POINTS_FIELD (default: customfield_10016)"
 
-py "$HOME/.openspec/lib/jira_upload.py"   "$TICKET_ID" "$SOURCE_FILE"   "$JIRA_BASE_URL" "$JIRA_EMAIL" "$JIRA_TOKEN"
+UPLOADER=""
+if [ -f "$CLI_DIR/lib/jira_upload.py" ]; then
+  UPLOADER="$CLI_DIR/lib/jira_upload.py"
+elif [ -f "$HOME/.openspec/lib/jira_upload.py" ]; then
+  UPLOADER="$HOME/.openspec/lib/jira_upload.py"
+else
+  os_error "jira_upload.py not found. Re-run: sh .openspec-cli/install.sh"
+  exit 1
+fi
+
+py -X utf8 "$UPLOADER" \
+  "$TICKET_ID" "$SOURCE_FILE" \
+  "$JIRA_BASE_URL" "$JIRA_EMAIL" "$JIRA_TOKEN"
 
 EXIT_CODE=$?
 if [ "$EXIT_CODE" = "0" ]; then

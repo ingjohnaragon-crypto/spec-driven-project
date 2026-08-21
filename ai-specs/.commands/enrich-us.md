@@ -1,56 +1,127 @@
-Please analyze and fix the Jira ticket: $ARGUMENTS.
+Please enrich the Jira ticket: $ARGUMENTS.
 
 Follow these steps:
 
-1. Use Jira MCP to get the ticket details, whether it is the ticket id/number, keywords referring to the ticket or indicating status, like "the one in progress"
-2. You will act as a product expert with technical knowledge
-3. Understand the problem described in the ticket
-4. Decide whether or not the User Story is completely detailed according to product's best practices: Include a full description of the functionality, a comprehensive list of fields to be updated, the structure and URLs of the necessary endpoints, the files to be modified according to the architecture and best practices, the steps required for the task to be considered complete, how to update any relevant documentation or create unit tests, and non-functional requirements related to security, performance, etc
-5. If the user story lacks the technical and specific detail necessary to allow the developer to be fully autonomous when completing it, provide an improved story that is clearer, more specific, and more concise in line with product best practices described in step 4. Use the technical context you will find in 
-@documentation. Return it in markdown format.
-6. Update ticket in Jira, adding the new content after the old one and marking each section with the h2 tags [original] and [enhanced]. Apply proper formatting to make it readable and visually clear, using appropriate text types (lists, code snippets...).
-7. If the ticket status was "To refine", move the task to the "Pending refinement validation" column (or the equivalent transition in **this** Jira project — status names vary by workflow; use the MCP to discover valid transitions).
+1. The ticket details are already provided above under `## Jira Ticket: $ARGUMENTS` — use that as source of truth. Do not fetch Jira again.
+2. Act as a product expert with technical knowledge of Vault Smart Contracts (API 4.0).
+3. Improve the story so a developer can implement it without back-and-forth.
+4. Include only what is needed: clear behaviour, hooks, parameters/types, files, acceptance criteria, key tests, sandbox constraints, **and a Fibonacci story-points estimate**.
+5. If subtasks are listed under `## Subtasks`, enrich each one that lacks detail (including its own story points). Do not invent subtasks.
+6. Do NOT update Jira and do NOT transition status (`os-enrich-apply` / `os-transition` are separate steps).
 
-## Output
+## Language for section headers (mandatory)
 
-Save the enriched content as a markdown file at `ai-specs/changes/$ARGUMENTS_enriched.md`
-using this structure:
+**All section headers MUST use the Active Language.**
 
----
+Spanish (`es`):
 
-### `# Enriched Ticket: <TICKET-ID> — <Summary>`
+| Sección | Encabezado obligatorio |
+|---|---|
+| Título | `# Ticket enriquecido: <TICKET-ID> — <Summary>` |
+| Descripción original | `## Descripción original` |
+| Descripción mejorada | `## Descripción mejorada` |
+| Criterios de aceptación | `## Criterios de aceptación` |
+| Hooks y tipos | `## Campos, hooks y tipos` |
+| Archivos | `## Archivos a crear o modificar` |
+| Pruebas | `## Casos de prueba unitarios` |
+| No funcionales | `## Requisitos no funcionales` |
+| Puntos de historia | `## Puntos de historia` |
+| Subtareas | `## Subtareas` |
 
-### `## Original Description`
-(copy of the original ticket description)
+English (`en`):
 
-### `## Enhanced Description`
-Full description of the functionality as refined.
+| Section | Required header |
+|---|---|
+| Title | `# Enriched Ticket: <TICKET-ID> — <Summary>` |
+| Original | `## Original Description` |
+| Enhanced | `## Enhanced Description` |
+| AC | `## Acceptance Criteria` |
+| Hooks | `## Fields, Hooks & Types` |
+| Files | `## Files to Create or Modify` |
+| Tests | `## Unit Test Cases` |
+| NFR | `## Non-Functional Requirements` |
+| Story points | `## Story Points` |
+| Subtasks | `## Subtasks` |
 
-### `## Acceptance Criteria`
-- [ ] Criterion 1
-- [ ] Criterion 2
+## Output document structure
 
-### `## Fields & Endpoints`
-Table or list of fields to create/update, endpoint URLs, HTTP methods,
-request/response shapes.
+Return ONE markdown document with this shape (headers already localized above).
+**Story points are mandatory** — wrap the estimate in `<!-- STORY_POINTS:<N> -->` …
+`<!-- /STORY_POINTS -->` so `os-enrich-apply` can write the Jira Story Points field.
 
-### `## Files to Create or Modify`
-| File | Layer | Action |
+```markdown
+# Ticket enriquecido: <TICKET-ID> — <Summary>
+
+## Descripción original
+<!-- jira-skip -->
+(breve copia limpia de la descripción original — archivo local only)
+<!-- /jira-skip -->
+
+## Descripción mejorada
+2-4 párrafos cortos: comportamiento del producto, cuándo corre cada hook,
+y qué cambia en saldos / postings. Sin pegar el agent stack completo.
+
+## Criterios de aceptación
+- [ ] Criterio de negocio observable
+- [ ] ...
+- [ ] os-vault-test pasa
+- [ ] os-vault-test --coverage pasa (>= 90%)
+
+## Campos, hooks y tipos
+- Hooks: ...
+- Parámetros: ...
+- Tipos contracts_api: ...
+
+## Archivos a crear o modificar
+| Archivo | Capa | Acción |
 |---|---|---|
-| `path/to/file.ext` | Domain / Application / Presentation / Infrastructure | Create / Modify |
+| `contracts/<name>.py` | Contract | Create |
+| `tests/test_<name>.py` | Tests | Create |
 
-### `## Unit Test Cases`
+## Casos de prueba unitarios
 - Happy path
-- Validation error
-- Not found / Conflict
-- Edge cases
+- Validación / rechazo
+- Edge cases (prepago, denominación, etc.)
 
-### `## Non-Functional Requirements`
-Security, performance, validation constraints.
+## Requisitos no funcionales
+Sandbox Vault, Decimal, ZoneInfo, sin I/O.
 
----
+## Puntos de historia
+<!-- STORY_POINTS:<N> -->
+Estimate using Fibonacci (1, 2, 3, 5, 8, 13). One short justification line.
+Example: **5** — posting + schedule + tests; no new vault accounts.
+<!-- /STORY_POINTS -->
 
-## Final message format
+## Subtareas
+(solo si existen en el contexto)
 
-> Enriched content saved to `ai-specs/changes/<ticket-id>_enriched.md`.
-> Run `os-enrich-apply <TICKET-ID>` to upload it to Jira.
+<!-- SUBTASK:<SUBTASK-KEY> -->
+### Subtarea: <SUBTASK-KEY> — <Summary>
+
+#### Descripción original
+<!-- jira-skip -->
+(copy)
+<!-- /jira-skip -->
+
+#### Descripción mejorada
+Refined, technically detailed description.
+
+#### Criterios de aceptación
+- [ ] Criterion 1
+
+#### Puntos de historia
+<!-- STORY_POINTS:<N> -->
+Fibonacci estimate for this subtask only.
+<!-- /STORY_POINTS -->
+<!-- /SUBTASK:<SUBTASK-KEY> -->
+```
+
+## Style for Copilot / clipboard agents
+
+- Short paragraphs (1-3 sentences).
+- One bullet per idea.
+- No giant code blocks; at most one small example if essential.
+- No tables of unrelated stacks (Java/Spring, etc.).
+- No repeating the prompt or cheatsheet verbatim.
+- Readable in Jira after `os-enrich-apply`.
+- Always include `<!-- STORY_POINTS:<N> -->` on the parent ticket and on each refined subtask.

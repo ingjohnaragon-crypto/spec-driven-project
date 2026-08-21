@@ -58,6 +58,62 @@ print(adf(raw).strip() or 'No description provided.')
   os_success "Ticket: [$JIRA_STATUS] $JIRA_SUMMARY"
 }
 
+# ── Fetch subtasks of a ticket (the HU) ──────────────────────
+os_jira_fetch_subtasks() {
+  ticket_id="$1"
+  os_step "Fetching subtasks for $ticket_id..."
+
+  response=$(curl -s \
+    -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+    -H "Accept: application/json" \
+    -G \
+    --data-urlencode "jql=parent=$ticket_id ORDER BY created ASC" \
+    --data-urlencode "fields=summary,status,issuetype,description,assignee" \
+    --data-urlencode "maxResults=50" \
+    "$JIRA_BASE_URL/rest/api/3/search/jql")
+
+  JIRA_SUBTASK_KEYS=$(echo "$response" | py -c \
+    "import sys,json; d=json.load(sys.stdin); print(' '.join(i['key'] for i in d.get('issues',[])))" \
+    2>/dev/null || echo "")
+
+  JIRA_SUBTASKS_CONTEXT=$(echo "$response" | py -c \
+"import sys,json
+def adf(n):
+  if not n: return ''
+  t=n.get('type','')
+  if t=='text': return n.get('text','')
+  if t=='hardBreak': return '\n'
+  return ''.join(adf(c) for c in n.get('content',[]))+(('\n') if t in ('paragraph','heading','listItem','bulletList','orderedList') else '')
+d=json.load(sys.stdin)
+blocks=[]
+for i in d.get('issues',[]):
+  f=i['fields']
+  desc=adf(f.get('description') or {}).strip() or 'No description provided.'
+  blocks.append('### '+i['key']+' - '+f['summary']+'\nStatus: '+f['status']['name']+'\n\n'+desc)
+print('\n\n---\n\n'.join(blocks) if blocks else 'No subtasks found for this ticket.')
+" 2>/dev/null || echo "No subtasks found for this ticket.")
+
+  export JIRA_SUBTASK_KEYS JIRA_SUBTASKS_CONTEXT
+
+  count=0
+  for _k in $JIRA_SUBTASK_KEYS; do count=$((count + 1)); done
+  os_success "Found $count subtask(s)"
+}
+
+# ── Print subtasks summary ───────────────────────────────────
+os_jira_print_subtasks() {
+  if [ -z "$JIRA_SUBTASK_KEYS" ]; then
+    os_info "Subtasks : none"
+    return
+  fi
+  os_divider
+  os_label "  Subtasks:"
+  for _k in $JIRA_SUBTASK_KEYS; do
+    os_info "  - $_k"
+  done
+  os_divider
+}
+
 # ── Print ticket summary ─────────────────────────────────────
 os_jira_print_ticket() {
   os_divider
@@ -128,40 +184,57 @@ os_jira_create_ticket() {
 
   os_step "Creating $_type in project $_project..."
 
+  # Prefer project-local converter, then installed ~/.openspec copy.
+  _md_to_adf=""
+  if [ -n "${OS_CLI_LIB:-}" ] && [ -f "${OS_CLI_LIB}/md_to_adf.py" ]; then
+    _md_to_adf="${OS_CLI_LIB}/md_to_adf.py"
+  elif [ -f "$HOME/.openspec/lib/md_to_adf.py" ]; then
+    _md_to_adf="$HOME/.openspec/lib/md_to_adf.py"
+  fi
+
   _payload=$(py -c "
 import json, sys
+from pathlib import Path
 
 summary     = sys.argv[1]
 description = sys.argv[2]
 project     = sys.argv[3]
 issuetype   = sys.argv[4]
+converter   = sys.argv[5]
 
-paragraphs = []
-for para in description.split('\n\n'):
-    para = para.strip()
-    if para:
-        paragraphs.append({
-            'type': 'paragraph',
-            'content': [{'type': 'text', 'text': para}]
-        })
+if converter:
+    sys.path.insert(0, str(Path(converter).resolve().parent))
+    from md_to_adf import markdown_to_adf
+    description_adf = markdown_to_adf(description)
+else:
+    # Fallback: flat paragraphs (legacy)
+    paragraphs = []
+    for para in description.split('\n\n'):
+        para = para.strip()
+        if para:
+            paragraphs.append({
+                'type': 'paragraph',
+                'content': [{'type': 'text', 'text': para}]
+            })
+    description_adf = {
+        'type': 'doc',
+        'version': 1,
+        'content': paragraphs or [
+            {'type': 'paragraph',
+             'content': [{'type': 'text', 'text': description}]}
+        ]
+    }
 
-body = 
+body = {
     'fields': {
         'project':     {'key': project},
         'summary':     summary,
         'issuetype':   {'name': issuetype},
-        'description': {
-            'type':    'doc',
-            'version': 1,
-            'content': paragraphs or [
-                {'type': 'paragraph',
-                 'content': [{'type': 'text', 'text': description}]}
-            ]
-        }
+        'description': description_adf,
     }
 }
-print(json.dumps(body))
-" "$_summary" "$_desc" "$_project" "$_type")
+print(json.dumps(body, ensure_ascii=False))
+" "$_summary" "$_desc" "$_project" "$_type" "$_md_to_adf")
 
   _response=$(curl -s \
     -X POST \

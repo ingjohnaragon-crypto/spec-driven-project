@@ -9,6 +9,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/jira.sh"
 . "$CLI_DIR/lib/agent.sh"
+. "$CLI_DIR/lib/language.sh"
 
 if [ -z "$TICKET_ID" ]; then
   os_error "Usage: os-develop <TICKET-ID>"
@@ -18,7 +19,9 @@ fi
 os_load_config
 os_load_env
 os_load_agent
+os_load_language
 os_print_config
+os_print_language
 os_require_jira_env
 os_jira_fetch_ticket "$TICKET_ID"
 os_jira_print_ticket
@@ -45,8 +48,18 @@ AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGE
 STANDARDS_CONTENT="";[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
 BASE_STANDARDS="";   BASE_FILE="$OS_REPO_ROOT/ai-specs/specs/base-standards.mdc"
                      [ -f "$BASE_FILE" ] && BASE_STANDARDS=$(cat "$BASE_FILE")
+DOC_STANDARDS="";    DOC_FILE="$OS_REPO_ROOT/ai-specs/specs/documentation-standards.mdc"
+                     [ -f "$DOC_FILE" ] && DOC_STANDARDS=$(cat "$DOC_FILE")
+UPDATE_DOCS_TASK="";  UPDATE_DOCS_FILE="$OS_REPO_ROOT/ai-specs/.commands/update-docs.md"
+                     [ -f "$UPDATE_DOCS_FILE" ] && UPDATE_DOCS_TASK=$(cat "$UPDATE_DOCS_FILE")
 
-PLAN_FILE="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
+PLAN_FILE="$OS_REPO_ROOT/ai-specs/changes/planes/${TICKET_ID}/${TICKET_ID}_backend.md"
+LEGACY_PLAN="$OS_REPO_ROOT/ai-specs/changes/${TICKET_ID}_backend.md"
+if [ ! -f "$PLAN_FILE" ] && [ -f "$LEGACY_PLAN" ]; then
+  PLAN_FILE="$LEGACY_PLAN"
+  os_info "Using legacy plan path: $PLAN_FILE"
+fi
+
 PLAN_SECTION=""
 if [ -f "$PLAN_FILE" ]; then
   os_success "Found existing plan: $PLAN_FILE"
@@ -59,14 +72,13 @@ else
 Run: os-plan $TICKET_ID — then come back to this step."
 fi
 
-COMMAND_TEMPLATE="";  CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/develop-backend.md"
-[ -f "$CMD_FILE" ] && COMMAND_TEMPLATE=$(cat "$CMD_FILE" \
-  | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
-  | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
-  | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
-  | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
-  | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
-  | sed "s|\$ARGUMENTS|$TICKET_ID|g")
+COMMAND_TEMPLATE=""
+CMD_FILE=$(os_command_template_path develop)
+if [ -f "$CMD_FILE" ]; then
+  COMMAND_TEMPLATE=$(os_substitute_command_template "$CMD_FILE" "$TICKET_ID")
+else
+  os_warn "Command template not found: $CMD_FILE"
+fi
 
 # ── Build prompt ─────────────────────────────────────────────
 os_step "Building implementation prompt..."
@@ -76,11 +88,23 @@ You are acting as the backend-developer agent for an openspec project.
 You are on branch: $BRANCH
 IMPLEMENT the following Jira ticket following the plan below.
 
+## Autonomous execution (mandatory)
+- Do NOT ask the human any product/design questions. Do not pause for decisions.
+- Follow plan section "Decisiones bloqueadas" / locked decisions exactly.
+- If anything is still ambiguous, mirror contracts/fixed_term_deposit.py and continue.
+- Deliver a complete contract + tests (no skeletons, no TODO stubs, no try/except around contracts_api).
+- Use correct API 4.0 hook names only (*_hook, never *_code).
+
+## Active Language
+$OS_LANGUAGE_LABEL
+$OS_LANGUAGE_DIRECTIVE
+
 ## Active Stack
 Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Build   : $OS_BUILD_CMD
 Test    : $OS_TEST_CMD
 Coverage: $OS_COVERAGE_CMD
+Golden reference: contracts/fixed_term_deposit.py + tests/test_fixed_term_deposit.py
 
 ## Jira Ticket: $JIRA_TICKET_ID
 Summary : $JIRA_SUMMARY
@@ -94,6 +118,12 @@ $PLAN_SECTION
 ---
 ## Base Standards
 $BASE_STANDARDS
+
+---
+## Documentation Standards
+$DOC_STANDARDS
+
+Documentation update task: $UPDATE_DOCS_TASK
 
 ---
 ## Stack Agent (your role)
@@ -116,24 +146,18 @@ os_divider
 
 # ── Deliver prompt ────────────────────────────────────────────
 # os-develop is different: the AI writes code directly into files.
-# For CLI agents: send the prompt and let the agent work autonomously.
-# For clipboard: copy and paste in the IDE.
+os_deliver_prompt_autonomous "$PROMPT_FILE"
+
 if [ "${OS_AGENT_DELIVERY:-clipboard}" = "cli" ]; then
-  os_step "Sending implementation prompt to $OS_AGENT_LABEL..."
-  os_info "The agent will implement the ticket autonomously."
-  os_info "Check the created/modified files when it finishes."
-  ${OS_AGENT_COMMAND} ${OS_AGENT_ARGS} < "$PROMPT_FILE"
   os_divider
   os_success "Implementation complete — review the changes:"
   git status --short
-else
-  printf '%s' "$PROMPT" | clip 2>/dev/null || true
-  os_success "Prompt copied to clipboard!"
-  os_info "1. Paste in $OS_AGENT_LABEL (VS Code / Cursor)"
-  os_info "2. The AI implements step by step"
-  os_info "3. Review changes, then run:"
 fi
 
 os_divider
-os_info "Next step: os-vault-test && os-commit $TICKET_ID"
+if [ "$OS_ACTIVE_STACK" = "vault-smart-contracts" ]; then
+  os_info "Next step: os-vault-test --coverage && os-commit $TICKET_ID"
+else
+  os_info "Next step: os-commit $TICKET_ID"
+fi
 os_divider

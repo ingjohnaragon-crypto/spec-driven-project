@@ -1,10 +1,23 @@
 # review-pr
 
+> **Note:** When active stack is `vault-smart-contracts`, OpenSpec uses
+> `review-vault-pr.md` instead of this template.
+
 PR Number: $ARGUMENTS
 
 ## Goal
 Review a Pull Request against the active stack standards and generate a structured,
-actionable code review. Save the result to `ai-specs/changes/` for traceability.
+actionable code review. Persist only a temporary working file under `.openspec-cli/`
+(GitHub is the source of truth after `os-review-apply`).
+
+## Autonomy rules (mandatory)
+
+- **Do not ask the human questions.** Do not pause for design choices.
+- If the ticket plan has locked decisions, treat them as final.
+- If ambiguous, choose the safest stack-consistent option, note it in Summary, continue.
+- Always write the complete review to `.openspec-cli/.review-output.md`.
+- Always include `## Final Verdict` with **APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**.
+- Last chat message: only the save confirmation — never a question.
 
 ## Pre-flight checklist
 
@@ -17,7 +30,7 @@ actionable code review. Save the result to `ai-specs/changes/` for traceability.
 3. Fetch PR metadata: title, author, branch, base, additions, deletions, changed files
 4. Download the PR diff
 5. If the branch contains a ticket ID (e.g. `KAN-XX`), load its plan from
-   `ai-specs/changes/<ticket-id>_backend.md` if it exists
+   `ai-specs/changes/planes/<ticket-id>/<ticket-id>_backend.md` if it exists
 
 ## Review areas
 
@@ -33,12 +46,16 @@ actionable code review. Save the result to `ai-specs/changes/` for traceability.
 2. Classify each issue: CRITICAL (blocking), MAJOR (strongly recommended), MINOR (suggestion)
 3. Note at least 2-3 positives
 4. Issue a final verdict: APPROVE / REQUEST CHANGES / COMMENT ONLY
-5. **Save the review** to `ai-specs/changes/<ticket-id>_review.md`
-   — If no ticket ID found in the branch name, use `ai-specs/changes/pr-<PR_NUMBER>_review.md`
+5. **Save the review** to `.openspec-cli/.review-output.md` (temporary working file only —
+   do **not** create review files under `ai-specs/changes/`)
+
+## Language
+
+Write the entire review (including section headers) in the Active Language from the prompt.
 
 ## Output format
 
-Save a markdown file at `ai-specs/changes/<ticket-id>_review.md` with this structure:
+Save a markdown file at `.openspec-cli/.review-output.md` with this structure:
 
 ---
 
@@ -59,7 +76,7 @@ Overall verdict: **APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**
 ### `## Architecture & Design`
 - DDD layered architecture respected?
 - Separation of concerns correct?
-- Any design decisions worth noting?
+- Alignment with locked plan decisions (no re-opening product choices)
 
 ### `## Code Quality`
 - Naming conventions followed?
@@ -94,5 +111,5 @@ If no issues: "No specific issues found."
 
 ## Final message format
 
-> I've saved the review to `ai-specs/changes/<ticket-id>_review.md`.
+> I've saved the review to `.openspec-cli/.review-output.md`.
 > Run `os-review-apply <PR_NUMBER>` to publish it to GitHub.

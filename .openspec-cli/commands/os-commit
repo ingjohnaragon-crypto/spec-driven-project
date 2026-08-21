@@ -12,9 +12,41 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
+. "$CLI_DIR/lib/language.sh"
+. "$CLI_DIR/lib/commit_docs.sh"
+
+# Prefer Git for Windows sh/bash over the WSL stub in WindowsApps.
+# Without this, husky/pre-commit can fail with:
+#   HCS_E_SERVICE_NOT_AVAILABLE / "Bash/Service/CreateInstance/..."
+os_prefer_git_bash() {
+  _git_bins=""
+  for _candidate in \
+    "/c/Program Files/Git/bin" \
+    "/c/Program Files/Git/usr/bin" \
+    "/c/Program Files (x86)/Git/bin" \
+    "/c/Program Files (x86)/Git/usr/bin" \
+    "/mnt/c/Program Files/Git/bin" \
+    "/mnt/c/Program Files/Git/usr/bin"
+  do
+    if [ -d "$_candidate" ]; then
+      _git_bins="${_git_bins}${_candidate}:"
+    fi
+  done
+  if [ -n "${PROGRAMFILES:-}" ] && [ -d "$PROGRAMFILES/Git/bin" ]; then
+    _git_bins="${_git_bins}${PROGRAMFILES}/Git/bin:${PROGRAMFILES}/Git/usr/bin:"
+  fi
+  if [ -n "$_git_bins" ]; then
+    PATH="${_git_bins}${PATH}"
+    export PATH
+  fi
+  unset _candidate _git_bins
+}
+
+os_prefer_git_bash
 
 os_load_config
 os_load_env
+os_load_language
 
 cd "$OS_REPO_ROOT"
 
@@ -43,7 +75,6 @@ if [ "$IS_PROTECTED" = "true" ]; then
   os_warn "OpenSpec never commits directly to $CURRENT_BRANCH."
   os_divider
 
-  # Build feature branch name
   if [ -n "$TICKET_ID" ]; then
     FEATURE_BRANCH="feature/${TICKET_ID}-$(date +%Y%m%d)"
   else
@@ -60,12 +91,23 @@ if [ "$IS_PROTECTED" = "true" ]; then
 fi
 
 # ── Check for changes ────────────────────────────────────────
-CHANGED_FILES=$(git status --porcelain | grep -v '^??' | awk '{print $2}')
-UNTRACKED=$(git status --porcelain | grep '^??' | awk '{print $2}')
+# -uall expands untracked dirs to files so ticket filters work
+CHANGED_FILES=$(git status --porcelain -uall | grep -v '^??' | awk '{print $2}')
+UNTRACKED=$(git status --porcelain -uall | grep '^??' | awk '{print $2}')
 
 if [ -z "$CHANGED_FILES" ] && [ -z "$UNTRACKED" ]; then
-  os_warn "No changes detected. Nothing to commit."
-  exit 0
+  # Still allow commit if ticket docs exist but were missed earlier
+  if [ -n "$TICKET_ID" ]; then
+    _plan_dir="ai-specs/changes/planes/${TICKET_ID}"
+    _enrich_dir="ai-specs/changes/enriquecimientos/${TICKET_ID}"
+    if [ ! -d "$_plan_dir" ] && [ ! -d "$_enrich_dir" ]; then
+      os_warn "No changes detected. Nothing to commit."
+      exit 0
+    fi
+  else
+    os_warn "No changes detected. Nothing to commit."
+    exit 0
+  fi
 fi
 
 os_divider
@@ -80,14 +122,71 @@ git add -u
 
 for f in $UNTRACKED; do
   case "$f" in
-    .env|*.env|*.secret|build/|dist/|target/|node_modules/|__pycache__/)
+    .env|*.env|*.secret|build/*|dist/*|target/*|node_modules/*|__pycache__/*|.venv/*|venv/*|.pytest_cache/*|htmlcov/*|coverage/*|.cache/*|*.pyc|*.pack|*.pack.old)
       os_warn "Skipping: $f"
       ;;
+    openspec/config.yaml)
+      os_warn "Skipping local OpenSpec config: $f"
+      ;;
+    .openspec-cli/.enriched-content.md|.openspec-cli/.fix-prompt.md|.openspec-cli/.review-*.md)
+      os_warn "Skipping CLI scratch file: $f"
+      ;;
     *)
+      if [ -n "$TICKET_ID" ]; then
+        case "$f" in
+          ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
+            case "$f" in
+              *"/${TICKET_ID}/"*|*"/${TICKET_ID}_"*|*"${TICKET_ID}"*) ;;
+              *)
+                os_warn "Skipping unrelated artifact: $f"
+                continue
+                ;;
+            esac
+            ;;
+        esac
+      fi
       git add "$f"
       ;;
   esac
 done
+
+# Always version plan + enrichment for this ticket (documentation)
+if [ -n "$TICKET_ID" ]; then
+  os_stage_ticket_docs "$TICKET_ID"
+fi
+
+# Unstage artifacts that may already be tracked or were force-added
+STAGED_RAW=$(git diff --cached --name-only || true)
+if [ -n "$STAGED_RAW" ]; then
+  echo "$STAGED_RAW" | while IFS= read -r f; do
+    [ -z "$f" ] && continue
+    case "$f" in
+      node_modules/*|dist/*|build/*|coverage/*|htmlcov/*|.cache/*|__pycache__/*|.venv/*|venv/*|*.pyc|*.pack|*.pack.old)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged artifact: $f"
+        ;;
+      openspec/config.yaml)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged local OpenSpec config: $f"
+        ;;
+      .openspec-cli/.enriched-content.md|.openspec-cli/.fix-prompt.md)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged CLI scratch file: $f"
+        ;;
+      ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
+        if [ -n "$TICKET_ID" ]; then
+          case "$f" in
+            *"/${TICKET_ID}/"*|*"/${TICKET_ID}_"*|*"${TICKET_ID}"*) ;;
+            *)
+              git reset HEAD -- "$f" >/dev/null 2>&1 || true
+              os_warn "Unstaged unrelated artifact: $f"
+              ;;
+          esac
+        fi
+        ;;
+    esac
+  done
+fi
 
 STAGED=$(git diff --cached --name-only)
 if [ -z "$STAGED" ]; then
@@ -98,16 +197,17 @@ fi
 os_info "Staged files:"
 echo "$STAGED" | sed 's/^/  /'
 
+os_info "Note: CRLF/LF line-ending notices from git are informational only."
+
 # ── Determine scope ──────────────────────────────────────────
 SCOPE=$(echo "$STAGED" \
-  | grep -oE 'src/[^/]+/[^/]+/[^/]+' \
-  | awk -F'/' '{print $4}' \
+  | grep -oE 'contracts/[^/]+' \
+  | sed 's|contracts/||;s|\.py$||' \
   | sort | uniq -c | sort -rn \
   | head -1 | awk '{print $2}' \
-  | tr '[:upper:]' '[:lower:]' \
-  | sed 's/controller//;s/service//;s/handler//')
+  | tr '[:upper:]' '[:lower:]')
 
-[ -z "$SCOPE" ] && SCOPE="app"
+[ -z "$SCOPE" ] && SCOPE="vault"
 
 # ── Build commit message ─────────────────────────────────────
 os_step "Building commit message..."
@@ -122,17 +222,26 @@ case "$CURRENT_BRANCH" in
   *)          COMMIT_TYPE="feat" ;;
 esac
 
-FILE_COUNT=$(echo "$STAGED" | wc -l | tr -d ' ')
+FILE_COUNT=$(echo "$STAGED" | sed '/^$/d' | wc -l | tr -d ' ')
 
-if [ -n "$TICKET_ID" ]; then
-  SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
-  BODY="- Implements $TICKET_ID: changes across $FILE_COUNT file(s)
-- Stack: $OS_ACTIVE_STACK
-- Branch: $CURRENT_BRANCH"
-else
-  SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
-  BODY="- Changes across $FILE_COUNT file(s)
+if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+  if [ -n "$TICKET_ID" ]; then
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): implementa $TICKET_ID"
+    BODY="$(os_build_commit_body "$TICKET_ID" "$STAGED" es)"
+  else
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): aplica cambios de $CURRENT_BRANCH"
+    BODY="- Cambios en $FILE_COUNT archivo(s)
 - Stack: $OS_ACTIVE_STACK"
+  fi
+else
+  if [ -n "$TICKET_ID" ]; then
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
+    BODY="$(os_build_commit_body "$TICKET_ID" "$STAGED" en)"
+  else
+    SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
+    BODY="- Changes across $FILE_COUNT file(s)
+- Stack: $OS_ACTIVE_STACK"
+  fi
 fi
 
 os_divider
@@ -155,7 +264,16 @@ case "$confirm" in
 esac
 
 # ── Commit ───────────────────────────────────────────────────
-git commit -m "$SUBJECT" -m "$BODY"
+os_prefer_git_bash
+os_step "Running git commit (pre-commit hooks may run)..."
+if ! git commit -m "$SUBJECT" -m "$BODY"; then
+  os_warn "Commit failed (often a pre-commit hook)."
+  os_warn "On Windows: ensure Git for Windows is installed and PATH prefers"
+  os_warn "  'C:\\Program Files\\Git\\bin' over WindowsApps\\bash.exe (WSL stub)."
+  os_warn "If you see HCS_E_SERVICE_NOT_AVAILABLE, the shell failed — not the linter."
+  os_warn "Re-run from Git Bash or fix PATH, then os-commit again."
+  exit 1
+fi
 os_success "Committed: $SUBJECT"
 
 # ── Push ─────────────────────────────────────────────────────
@@ -171,72 +289,53 @@ fi
 
 os_step "Creating Pull Request → develop..."
 
+# If a PR already exists for this branch, update its body instead of failing create
+EXISTING_PR=$(gh pr view --json number,url -q '.number' 2>/dev/null || true)
+PR_BODY_FILE="$OS_REPO_ROOT/.openspec-cli/.pr-body.md"
+
 if [ -n "$TICKET_ID" ]; then
   PR_TITLE="[$TICKET_ID] $SUBJECT"
-  PR_BODY="## Summary
-Implements $TICKET_ID on stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-
-## Changes
-$(echo "$STAGED" | sed 's/^/- /')
-
-## Checklist
-- [ ] Tests pass (\`$OS_TEST_CMD\`)
-- [ ] Coverage >= 90% (\`$OS_COVERAGE_CMD\`)
-- [ ] Documentation updated
-- [ ] Endpoints manually tested"
+  # Write UTF-8 body to file — never pass Spanish text via shell --body (mojibake on Windows)
+  PR_BODY_FILE="$(os_build_pr_body_file "$TICKET_ID" "$STAGED" "$OS_ACTIVE_LANGUAGE")"
 else
   PR_TITLE="$SUBJECT"
-  PR_BODY="## Summary
-Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Branch: $CURRENT_BRANCH
-
-## Changes
-$(echo "$STAGED" | sed 's/^/- /')"
+  if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+    {
+      echo "## Resumen"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Rama: $CURRENT_BRANCH"
+      echo ""
+      echo "## Cambios"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
+  else
+    {
+      echo "## Summary"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Branch: $CURRENT_BRANCH"
+      echo ""
+      echo "## Changes"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
+  fi
 fi
 
-PR_URL=$(gh pr create \
-  --title "$PR_TITLE" \
-  --body "$PR_BODY" \
-  --head "$CURRENT_BRANCH" \
-  --base "develop" 2>&1)
+if [ -n "$EXISTING_PR" ]; then
+  os_info "PR #$EXISTING_PR already exists — updating title/body..."
+  gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body-file "$PR_BODY_FILE" >/dev/null
+  PR_URL=$(gh pr view "$EXISTING_PR" --json url -q .url)
+  os_success "Pull Request updated → develop"
+else
+  PR_URL=$(gh pr create \
+    --title "$PR_TITLE" \
+    --body-file "$PR_BODY_FILE" \
+    --head "$CURRENT_BRANCH" \
+    --base "develop" 2>&1)
+  os_success "Pull Request created → develop"
+fi
 
 os_divider
-os_success "Pull Request created → develop"
 os_info    "$PR_URL"
 os_divider
 
-# ── Save commit record ────────────────────────────────────────
-if [ -n "$TICKET_ID" ]; then
-  CHANGES_DIR="$OS_REPO_ROOT/ai-specs/changes"
-  mkdir -p "$CHANGES_DIR"
-  COMMIT_FILE="$CHANGES_DIR/${TICKET_ID}_commit.md"
-  PR_NUMBER=$(echo "$PR_URL" | grep -oE '[0-9]+$' || echo "?")
-
-  cat > "$COMMIT_FILE" << RECORD_EOF
-# Commit Record: $TICKET_ID
-
-## Branch
-$CURRENT_BRANCH
-
-## Commit
-- **Message**: $SUBJECT
-- **Files changed**: $FILE_COUNT file(s)
-- **Stack**: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-
-## Changed Files
-$(echo "$STAGED" | sed 's/^/- /')
-
-## Pull Request
-- **URL**: $PR_URL
-- **Base branch**: develop
-- **Status**: Open
-
-## Next Steps
-- [ ] \`os-review $PR_NUMBER\` — generate code review
-- [ ] \`os-review-apply $PR_NUMBER\` — publish to GitHub
-- [ ] \`os-transition $TICKET_ID "In Review"\` — update Jira
-RECORD_EOF
-
-  os_info "Commit record: ai-specs/changes/${TICKET_ID}_commit.md"
-  os_divider
-fi
+os_info "Next: os-review <PR_NUMBER> then os-review-apply <PR_NUMBER>"

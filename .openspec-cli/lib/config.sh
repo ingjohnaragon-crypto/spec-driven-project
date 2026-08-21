@@ -45,10 +45,22 @@ os_load_config() {
 os_load_env() {
   env_file="${OS_REPO_ROOT:-$(pwd)}/.env"
   if [ ! -f "$env_file" ]; then os_warn ".env not found"; return; fi
-  JIRA_BASE_URL=$(grep "^JIRA_BASE_URL=" "$env_file" | cut -d= -f2- | tr -d "")
-  JIRA_EMAIL=$(grep    "^JIRA_EMAIL="    "$env_file" | cut -d= -f2- | tr -d "")
-  JIRA_TOKEN=$(grep    "^JIRA_TOKEN="    "$env_file" | cut -d= -f2- | tr -d "")
-  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN
+  # Under `set -o pipefail`, a missing key makes `grep` exit 1 and aborts the
+  # caller (e.g. os-transition). Read optional keys safely.
+  _os_env_get() {
+    grep "^$1=" "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true
+  }
+  JIRA_BASE_URL=$(_os_env_get JIRA_BASE_URL)
+  JIRA_EMAIL=$(_os_env_get JIRA_EMAIL)
+  JIRA_TOKEN=$(_os_env_get JIRA_TOKEN)
+  JIRA_PROJECT_KEY=$(_os_env_get JIRA_PROJECT_KEY)
+  JIRA_STORY_POINTS_FIELD=$(_os_env_get JIRA_STORY_POINTS_FIELD)
+  VAULT_BASE_URL=$(_os_env_get VAULT_BASE_URL)
+  VAULT_TOKEN=$(_os_env_get VAULT_TOKEN)
+  VAULT_DEFAULT_DENOMINATION=$(_os_env_get VAULT_DEFAULT_DENOMINATION)
+  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY JIRA_STORY_POINTS_FIELD
+  export VAULT_BASE_URL VAULT_TOKEN VAULT_DEFAULT_DENOMINATION
+  unset -f _os_env_get
   os_success "Loaded .env"
 }
 
@@ -73,4 +85,42 @@ os_print_config() {
   os_info "Agent     : $OS_AGENT_PATH"
   os_info "Standards : $OS_STANDARDS_PATH"
   os_divider
+}
+
+# Resolve ai-specs/.commands template path for plan | develop | review
+os_command_template_path() {
+  _kind="$1"
+  case "${OS_ACTIVE_STACK:-}" in
+    vault-smart-contracts)
+      case "$_kind" in
+        plan)    _base="plan-vault-contract" ;;
+        develop) _base="develop-vault-contract" ;;
+        review)  _base="review-vault-pr" ;;
+        *)       return 1 ;;
+      esac
+      ;;
+    *)
+      case "$_kind" in
+        plan)    _base="plan-backend-ticket" ;;
+        develop) _base="develop-backend" ;;
+        review)  _base="review-pr" ;;
+        *)       return 1 ;;
+      esac
+      ;;
+  esac
+  echo "$OS_REPO_ROOT/ai-specs/.commands/${_base}.md"
+}
+
+# Load a command template with tooling placeholders substituted
+os_substitute_command_template() {
+  _file="$1"
+  _arg="${2:-}"
+  [ -f "$_file" ] || return 1
+  cat "$_file" \
+    | sed "s|{{build_command}}|$OS_BUILD_CMD|g" \
+    | sed "s|{{test_command}}|$OS_TEST_CMD|g" \
+    | sed "s|{{run_command}}|$OS_RUN_CMD|g" \
+    | sed "s|{{lint_command}}|$OS_LINT_CMD|g" \
+    | sed "s|{{coverage_command}}|$OS_COVERAGE_CMD|g" \
+    | sed "s|\$ARGUMENTS|$_arg|g"
 }

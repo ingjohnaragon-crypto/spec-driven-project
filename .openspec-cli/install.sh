@@ -48,7 +48,16 @@ if [ "$MISSING" = "1" ]; then
 fi
 
 # ── Create install directory ──────────────────────────────────
-mkdir -p "$BIN_DIR"
+mkdir -p "$BIN_DIR" "$INSTALL_DIR/lib"
+
+# ── Copy lib files (commands resolve CLI_DIR as ~/.openspec) ──
+for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py "$REPO_CLI_DIR/lib/"*.md; do
+  [ -f "$lib_file" ] || continue
+  lib_name=$(basename "$lib_file")
+  sed 's/\r//' "$lib_file" > "$INSTALL_DIR/lib/$lib_name"
+  chmod +x "$INSTALL_DIR/lib/$lib_name" 2>/dev/null || true
+  success "Installed lib: $lib_name"
+done
 
 # ── Symlink commands ──────────────────────────────────────────
 for cmd_file in "$REPO_CLI_DIR/commands"/os-*; do
@@ -116,10 +125,13 @@ info "  source ~/.zshrc   (zsh)"
 info "  source ~/.bashrc  (bash)"
 divider
 label "  Available commands:"
-info "  os-plan    <TICKET-ID>   Generate implementation plan"
-info "  os-develop <TICKET-ID>   Prepare implementation prompt + create branch"
-info "  os-commit  [TICKET-ID]   Commit, push and open PR"
-info "  os-enrich  <TICKET-ID>   Enrich Jira ticket with technical detail"
+info "  os-plan           <TICKET-ID>            Generate implementation plan"
+info "  os-develop        <TICKET-ID>            Prepare implementation prompt + create branch"
+info "  os-commit         [TICKET-ID]            Commit, push and open PR"
+info "  os-enrich         <TICKET-ID>            Enrich Jira ticket with technical detail"
+info "  os-language       [--list | <lang>]      Switch or list output language"
+info "  os-tickets        [status] [--project KEY] List project tickets"
+info "  os-create-ticket  [--hu] [--project KEY] [summary] [type] Create ticket"
 divider
 label "  Setup:"
 info "  1. Copy .env.example to .env"
