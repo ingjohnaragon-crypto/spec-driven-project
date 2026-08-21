@@ -147,6 +147,15 @@ $DIFF_CONTENT
 \`\`\`
 
 ---
+## Autonomous review rules (mandatory)
+- Do NOT ask the human questions or request decisions.
+- Treat plan locked decisions (section 2.1) as final.
+- If ambiguous, prefer parity with contracts/fixed_term_deposit.py and continue.
+- Always write the COMPLETE review markdown to .openspec-cli/.review-output.md
+- Always include a Final Verdict line: **APPROVE** or **REQUEST CHANGES** or **COMMENT ONLY**
+- Your last chat message must only confirm the file was saved — never a question.
+
+---
 ## Your Task
 $REVIEW_TEMPLATE"
 

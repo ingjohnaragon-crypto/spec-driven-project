@@ -25,13 +25,7 @@ os_info "Stack  : ${OS_STACK_LABEL:-vault-smart-contracts}"
 os_info "Target : ${TARGET}"
 os_divider
 
-os_step "Checking Vault Python sandbox restrictions..."
-
-if "${OS_PYTHON}" "${OS_CLI_LIB}/vault_lint.py" "${TARGET}"; then
-    os_success "All contracts pass sandbox restriction checks."
-else
-    os_error "Sandbox violations found. Fix the errors above before running tests."
+export PYTHONIOENCODING="${PYTHONIOENCODING:-utf-8}"
+if ! "${OS_PYTHON}" -X utf8 "${OS_CLI_LIB}/vault_lint.py" "${TARGET}"; then
     exit 1
 fi
-
-os_divider
