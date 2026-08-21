@@ -1,18 +1,20 @@
 #!/bin/sh
 # .openspec-cli/install.sh
 # ─────────────────────────────────────────────────────────────
-# Installs the OpenSpec CLI globally by symlinking commands
-# into ~/.openspec/bin and adding it to PATH.
+# Installs / refreshes the OpenSpec CLI into ~/.openspec
 #
 # Usage (from repo root):
-#   chmod +x .openspec-cli/install.sh
-#   ./.openspec-cli/install.sh
+#   sh .openspec-cli/install.sh
+#
+# On Windows (Git Bash), commands are copied (symlinks are unreliable).
+# Re-run this script after pulling main to refresh all os-* commands + libs.
 # ─────────────────────────────────────────────────────────────
 set -e
 
 REPO_CLI_DIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="$HOME/.openspec"
 BIN_DIR="$INSTALL_DIR/bin"
+LIB_DIR="$INSTALL_DIR/lib"
 
 # ── Colors (inline — no sourcing needed at install time) ──────
 GREEN='\033[0;32m'; CYAN='\033[0;36m'
@@ -24,13 +26,35 @@ error()   { printf "${RED}✖  %s${RESET}\n" "$*" >&2; }
 label()   { printf "${BOLD}%s${RESET}\n" "$*"; }
 divider() { printf "${CYAN}%s${RESET}\n" "────────────────────────────────────────────"; }
 
+_os_has_python() {
+  for cmd in py python3 python; do
+    if command -v "$cmd" > /dev/null 2>&1; then
+      ver=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "")
+      if [ "$ver" = "3" ]; then
+        echo "$cmd"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
 divider
 label "  OpenSpec CLI — Installer"
 divider
+info "Source : $REPO_CLI_DIR"
+info "Target : $INSTALL_DIR"
 
 # ── Check dependencies ────────────────────────────────────────
 MISSING=0
-for dep in python3 curl git; do
+if ! _os_has_python > /dev/null; then
+  error "Missing required dependency: Python 3 (tried: py, python3, python)"
+  MISSING=1
+else
+  success "Python   : $(_os_has_python)"
+fi
+
+for dep in curl git; do
   if ! command -v "$dep" > /dev/null 2>&1; then
     error "Missing required dependency: $dep"
     MISSING=1
@@ -48,29 +72,60 @@ if [ "$MISSING" = "1" ]; then
 fi
 
 # ── Create install directory ──────────────────────────────────
-mkdir -p "$BIN_DIR" "$INSTALL_DIR/lib"
+mkdir -p "$BIN_DIR" "$LIB_DIR"
 
-# ── Copy lib files (commands resolve CLI_DIR as ~/.openspec) ──
+# ── Install lib files (always copy — commands resolve ~/.openspec/lib) ──
+info "Refreshing libraries..."
 for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py "$REPO_CLI_DIR/lib/"*.md; do
   [ -f "$lib_file" ] || continue
+  case "$(basename "$lib_file")" in
+    _*) continue ;;  # skip private helpers like _patch_*.py
+  esac
   lib_name=$(basename "$lib_file")
-  sed 's/\r//' "$lib_file" > "$INSTALL_DIR/lib/$lib_name"
-  chmod +x "$INSTALL_DIR/lib/$lib_name" 2>/dev/null || true
+  sed 's/\r//' "$lib_file" > "$LIB_DIR/$lib_name"
+  chmod +x "$LIB_DIR/$lib_name" 2>/dev/null || true
   success "Installed lib: $lib_name"
 done
 
-# ── Symlink commands ──────────────────────────────────────────
+# ── Install commands ──────────────────────────────────────────
+# Prefer symlink to the repo so edits are live; on Windows fall back to copy.
+info "Refreshing commands..."
+INSTALLED_CMDS=""
 for cmd_file in "$REPO_CLI_DIR/commands"/os-*; do
+  [ -f "$cmd_file" ] || continue
   cmd_name=$(basename "$cmd_file")
   target="$BIN_DIR/$cmd_name"
 
-  if [ -L "$target" ]; then
-    rm "$target"
+  # Remove previous link or stale copy
+  rm -f "$target"
+
+  linked=0
+  if ln -sf "$cmd_file" "$target" 2>/dev/null; then
+    # Git Bash on Windows may create a normal file instead of a symlink
+    if [ -L "$target" ]; then
+      linked=1
+      success "Linked : $cmd_name"
+    fi
   fi
 
-  ln -sf "$cmd_file" "$target"
-  chmod +x "$cmd_file"
-  success "Linked: $cmd_name -> $target"
+  if [ "$linked" = "0" ]; then
+    sed 's/\r//' "$cmd_file" > "$target"
+    chmod +x "$target"
+    success "Copied : $cmd_name"
+  fi
+
+  INSTALLED_CMDS="${INSTALLED_CMDS}${cmd_name}
+"
+done
+
+# Remove bin entries that no longer exist in the repo
+for installed in "$BIN_DIR"/os-*; do
+  [ -e "$installed" ] || continue
+  name=$(basename "$installed")
+  if [ ! -f "$REPO_CLI_DIR/commands/$name" ]; then
+    rm -f "$installed"
+    warn "Removed stale command: $name"
+  fi
 done
 
 # ── Add to PATH ───────────────────────────────────────────────
@@ -97,45 +152,24 @@ if [ "$PATH_ADDED" = "0" ]; then
   warn "  $PATH_LINE"
 fi
 
-# ── Create .env.example if not present ───────────────────────
-ENV_EXAMPLE="$REPO_CLI_DIR/../.env.example"
-if [ ! -f "$ENV_EXAMPLE" ]; then
-  cat > "$ENV_EXAMPLE" << 'ENV_EOF'
-# OpenSpec CLI — environment variables
-# Copy this file to .env (in your project root) and fill in the values.
-# NEVER commit .env to version control.
-
-# Jira Cloud
-JIRA_BASE_URL=https://your-org.atlassian.net
-JIRA_EMAIL=your@email.com
-JIRA_TOKEN=your_jira_api_token
-
-# GitHub (optional — gh CLI handles auth separately via: gh auth login)
-# GITHUB_TOKEN=your_github_personal_access_token
-ENV_EOF
-  success "Created .env.example"
-fi
-
 # ── Done ──────────────────────────────────────────────────────
 divider
-success "OpenSpec CLI installed successfully!"
+success "OpenSpec CLI installed / refreshed successfully!"
 divider
-info "Reload your shell or run:"
-info "  source ~/.zshrc   (zsh)"
-info "  source ~/.bashrc  (bash)"
+info "Reload your shell or run:  source ~/.bashrc"
 divider
-label "  Available commands:"
-info "  os-plan           <TICKET-ID>            Generate implementation plan"
-info "  os-develop        <TICKET-ID>            Prepare implementation prompt + create branch"
-info "  os-commit         [TICKET-ID]            Commit, push and open PR"
-info "  os-enrich         <TICKET-ID>            Enrich Jira ticket with technical detail"
-info "  os-language       [--list | <lang>]      Switch or list output language"
-info "  os-tickets        [status] [--project KEY] List project tickets"
-info "  os-create-ticket  [--hu] [--project KEY] [summary] [type] Create ticket"
+label "  Installed commands ($(printf '%s' "$INSTALLED_CMDS" | sed '/^$/d' | wc -l | tr -d ' ')):"
+printf '%s' "$INSTALLED_CMDS" | sed '/^$/d' | sort | while IFS= read -r c; do
+  info "  $c"
+done
 divider
-label "  Setup:"
-info "  1. Copy .env.example to .env"
-info "  2. Fill in JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN"
-info "  3. Run: gh auth login  (for PR creation)"
-info "  4. Test: os-plan KAN-1"
+label "  Vault extras:"
+info "  os-vault-lint / os-vault-test / os-vault-simulate / os-vault-deploy"
+info "  os-vault-account / os-vault-balances"
+divider
+label "  Workflow:"
+info "  os-enrich → os-plan → os-develop → os-vault-test --coverage → os-commit"
+info "  os-review → os-review-apply → os-review-fix (if needed)"
+divider
+info "Re-run this installer after every pull on main to refresh copied commands/libs."
 divider
