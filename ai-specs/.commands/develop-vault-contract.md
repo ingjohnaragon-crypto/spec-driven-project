@@ -71,9 +71,20 @@ Implement the Jira ticket: $ARGUMENTS
 Fix every violation before proceeding.
 
 ### Step 5 — Tests and coverage
+Create/update `tests/test_<product_name>.py` with the **same stem** as the contract
+(`contracts/foo.py` → `tests/test_foo.py`). CI enforces this pairing and runs all
+product tests under `tests/` with `--cov=contracts --cov-fail-under=90`.
+
+Do **not** rely on a hardcoded product list in CI. A new contract without its test
+module (or without executing it) leaves that file at 0% and collapses package coverage.
+
 ```bash
 {{build_command}}
 {{coverage_command}}
+```
+or:
+```bash
+os-vault-test contracts/<product_name>.py --coverage
 ```
 Coverage must be >= 90%. Add tests for uncovered branches before stopping.
 Quality bar: depth comparable to `test_fixed_term_deposit.py` for a full product.
