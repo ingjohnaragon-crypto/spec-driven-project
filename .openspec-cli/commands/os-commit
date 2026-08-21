@@ -13,6 +13,7 @@ CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 . "$CLI_DIR/lib/colors.sh"
 . "$CLI_DIR/lib/config.sh"
 . "$CLI_DIR/lib/language.sh"
+. "$CLI_DIR/lib/commit_docs.sh"
 
 # Prefer Git for Windows sh/bash over the WSL stub in WindowsApps.
 # Without this, husky/pre-commit can fail with:
@@ -90,12 +91,23 @@ if [ "$IS_PROTECTED" = "true" ]; then
 fi
 
 # ── Check for changes ────────────────────────────────────────
-CHANGED_FILES=$(git status --porcelain | grep -v '^??' | awk '{print $2}')
-UNTRACKED=$(git status --porcelain | grep '^??' | awk '{print $2}')
+# -uall expands untracked dirs to files so ticket filters work
+CHANGED_FILES=$(git status --porcelain -uall | grep -v '^??' | awk '{print $2}')
+UNTRACKED=$(git status --porcelain -uall | grep '^??' | awk '{print $2}')
 
 if [ -z "$CHANGED_FILES" ] && [ -z "$UNTRACKED" ]; then
-  os_warn "No changes detected. Nothing to commit."
-  exit 0
+  # Still allow commit if ticket docs exist but were missed earlier
+  if [ -n "$TICKET_ID" ]; then
+    _plan_dir="ai-specs/changes/planes/${TICKET_ID}"
+    _enrich_dir="ai-specs/changes/enriquecimientos/${TICKET_ID}"
+    if [ ! -d "$_plan_dir" ] && [ ! -d "$_enrich_dir" ]; then
+      os_warn "No changes detected. Nothing to commit."
+      exit 0
+    fi
+  else
+    os_warn "No changes detected. Nothing to commit."
+    exit 0
+  fi
 fi
 
 os_divider
@@ -116,12 +128,15 @@ for f in $UNTRACKED; do
     openspec/config.yaml)
       os_warn "Skipping local OpenSpec config: $f"
       ;;
+    .openspec-cli/.enriched-content.md|.openspec-cli/.fix-prompt.md|.openspec-cli/.review-*.md)
+      os_warn "Skipping CLI scratch file: $f"
+      ;;
     *)
       if [ -n "$TICKET_ID" ]; then
         case "$f" in
           ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
             case "$f" in
-              *"${TICKET_ID}"*) ;;
+              *"/${TICKET_ID}/"*|*"/${TICKET_ID}_"*|*"${TICKET_ID}"*) ;;
               *)
                 os_warn "Skipping unrelated artifact: $f"
                 continue
@@ -134,6 +149,11 @@ for f in $UNTRACKED; do
       ;;
   esac
 done
+
+# Always version plan + enrichment for this ticket (documentation)
+if [ -n "$TICKET_ID" ]; then
+  os_stage_ticket_docs "$TICKET_ID"
+fi
 
 # Unstage artifacts that may already be tracked or were force-added
 STAGED_RAW=$(git diff --cached --name-only || true)
@@ -149,10 +169,14 @@ if [ -n "$STAGED_RAW" ]; then
         git reset HEAD -- "$f" >/dev/null 2>&1 || true
         os_warn "Unstaged local OpenSpec config: $f"
         ;;
+      .openspec-cli/.enriched-content.md|.openspec-cli/.fix-prompt.md)
+        git reset HEAD -- "$f" >/dev/null 2>&1 || true
+        os_warn "Unstaged CLI scratch file: $f"
+        ;;
       ai-specs/changes/planes/*|ai-specs/changes/enriquecimientos/*)
         if [ -n "$TICKET_ID" ]; then
           case "$f" in
-            *"${TICKET_ID}"*) ;;
+            *"/${TICKET_ID}/"*|*"/${TICKET_ID}_"*|*"${TICKET_ID}"*) ;;
             *)
               git reset HEAD -- "$f" >/dev/null 2>&1 || true
               os_warn "Unstaged unrelated artifact: $f"
@@ -198,14 +222,12 @@ case "$CURRENT_BRANCH" in
   *)          COMMIT_TYPE="feat" ;;
 esac
 
-FILE_COUNT=$(echo "$STAGED" | wc -l | tr -d ' ')
+FILE_COUNT=$(echo "$STAGED" | sed '/^$/d' | wc -l | tr -d ' ')
 
 if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
   if [ -n "$TICKET_ID" ]; then
     SUBJECT="${COMMIT_TYPE}(${SCOPE}): implementa $TICKET_ID"
-    BODY="- Implementa $TICKET_ID: cambios en $FILE_COUNT archivo(s)
-- Stack: $OS_ACTIVE_STACK
-- Rama: $CURRENT_BRANCH"
+    BODY="$(os_build_commit_body "$TICKET_ID" "$STAGED" es)"
   else
     SUBJECT="${COMMIT_TYPE}(${SCOPE}): aplica cambios de $CURRENT_BRANCH"
     BODY="- Cambios en $FILE_COUNT archivo(s)
@@ -214,9 +236,7 @@ if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
 else
   if [ -n "$TICKET_ID" ]; then
     SUBJECT="${COMMIT_TYPE}(${SCOPE}): implement $TICKET_ID"
-    BODY="- Implements $TICKET_ID: changes across $FILE_COUNT file(s)
-- Stack: $OS_ACTIVE_STACK
-- Branch: $CURRENT_BRANCH"
+    BODY="$(os_build_commit_body "$TICKET_ID" "$STAGED" en)"
   else
     SUBJECT="${COMMIT_TYPE}(${SCOPE}): apply changes from $CURRENT_BRANCH"
     BODY="- Changes across $FILE_COUNT file(s)
@@ -269,62 +289,52 @@ fi
 
 os_step "Creating Pull Request → develop..."
 
-if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
-  if [ -n "$TICKET_ID" ]; then
-    PR_TITLE="[$TICKET_ID] $SUBJECT"
-    PR_BODY="## Resumen
-Implementa $TICKET_ID en el stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
+# If a PR already exists for this branch, update its body instead of failing create
+EXISTING_PR=$(gh pr view --json number,url -q '.number' 2>/dev/null || true)
+PR_BODY_FILE="$OS_REPO_ROOT/.openspec-cli/.pr-body.md"
 
-## Cambios
-$(echo "$STAGED" | sed 's/^/- /')
-
-## Checklist
-- [ ] Tests pasan (\`os-vault-test\` / \`$OS_TEST_CMD\`)
-- [ ] Cobertura >= 90% (\`$OS_COVERAGE_CMD\`)
-- [ ] Documentación actualizada
-- [ ] El contrato respeta las restricciones del sandbox Vault"
-  else
-    PR_TITLE="$SUBJECT"
-    PR_BODY="## Resumen
-Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Rama: $CURRENT_BRANCH
-
-## Cambios
-$(echo "$STAGED" | sed 's/^/- /')"
-  fi
+if [ -n "$TICKET_ID" ]; then
+  PR_TITLE="[$TICKET_ID] $SUBJECT"
+  # Write UTF-8 body to file — never pass Spanish text via shell --body (mojibake on Windows)
+  PR_BODY_FILE="$(os_build_pr_body_file "$TICKET_ID" "$STAGED" "$OS_ACTIVE_LANGUAGE")"
 else
-  if [ -n "$TICKET_ID" ]; then
-    PR_TITLE="[$TICKET_ID] $SUBJECT"
-    PR_BODY="## Summary
-Implements $TICKET_ID on stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-
-## Changes
-$(echo "$STAGED" | sed 's/^/- /')
-
-## Checklist
-- [ ] Tests pass (\`os-vault-test\` / \`$OS_TEST_CMD\`)
-- [ ] Coverage >= 90% (\`$OS_COVERAGE_CMD\`)
-- [ ] Documentation updated
-- [ ] Contract respects Vault Python sandbox restrictions"
+  PR_TITLE="$SUBJECT"
+  if [ "$OS_ACTIVE_LANGUAGE" = "es" ]; then
+    {
+      echo "## Resumen"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Rama: $CURRENT_BRANCH"
+      echo ""
+      echo "## Cambios"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
   else
-    PR_TITLE="$SUBJECT"
-    PR_BODY="## Summary
-Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
-Branch: $CURRENT_BRANCH
-
-## Changes
-$(echo "$STAGED" | sed 's/^/- /')"
+    {
+      echo "## Summary"
+      echo "Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)"
+      echo "Branch: $CURRENT_BRANCH"
+      echo ""
+      echo "## Changes"
+      echo "$STAGED" | sed 's/^/- /'
+    } > "$PR_BODY_FILE"
   fi
 fi
 
-PR_URL=$(gh pr create \
-  --title "$PR_TITLE" \
-  --body "$PR_BODY" \
-  --head "$CURRENT_BRANCH" \
-  --base "develop" 2>&1)
+if [ -n "$EXISTING_PR" ]; then
+  os_info "PR #$EXISTING_PR already exists — updating title/body..."
+  gh pr edit "$EXISTING_PR" --title "$PR_TITLE" --body-file "$PR_BODY_FILE" >/dev/null
+  PR_URL=$(gh pr view "$EXISTING_PR" --json url -q .url)
+  os_success "Pull Request updated → develop"
+else
+  PR_URL=$(gh pr create \
+    --title "$PR_TITLE" \
+    --body-file "$PR_BODY_FILE" \
+    --head "$CURRENT_BRANCH" \
+    --base "develop" 2>&1)
+  os_success "Pull Request created → develop"
+fi
 
 os_divider
-os_success "Pull Request created → develop"
 os_info    "$PR_URL"
 os_divider
 

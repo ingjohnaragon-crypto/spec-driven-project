@@ -10,6 +10,15 @@ Review a Pull Request against the active stack standards and generate a structur
 actionable code review. Persist only a temporary working file under `.openspec-cli/`
 (GitHub is the source of truth after `os-review-apply`).
 
+## Autonomy rules (mandatory)
+
+- **Do not ask the human questions.** Do not pause for design choices.
+- If the ticket plan has locked decisions, treat them as final.
+- If ambiguous, choose the safest stack-consistent option, note it in Summary, continue.
+- Always write the complete review to `.openspec-cli/.review-output.md`.
+- Always include `## Final Verdict` with **APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**.
+- Last chat message: only the save confirmation — never a question.
+
 ## Pre-flight checklist
 
 1. Read `openspec/config.yaml` and resolve:
@@ -67,7 +76,7 @@ Overall verdict: **APPROVE** / **REQUEST CHANGES** / **COMMENT ONLY**
 ### `## Architecture & Design`
 - DDD layered architecture respected?
 - Separation of concerns correct?
-- Any design decisions worth noting?
+- Alignment with locked plan decisions (no re-opening product choices)
 
 ### `## Code Quality`
 - Naming conventions followed?
