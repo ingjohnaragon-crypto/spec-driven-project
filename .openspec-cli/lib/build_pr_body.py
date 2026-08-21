@@ -189,6 +189,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--lang", default="es")
     parser.add_argument("--staged-file", help="File with staged paths, one per line")
     parser.add_argument("--repo-root", default=os.environ.get("OS_REPO_ROOT", "."))
+    parser.add_argument(
+        "--output",
+        help="Write UTF-8 body to this file (recommended on Windows). Default: stdout",
+    )
     args = parser.parse_args(argv)
 
     if args.staged_file:
@@ -215,8 +219,14 @@ def main(argv: list[str] | None = None) -> int:
         coverage_cmd=os.environ.get("OS_COVERAGE_CMD", "pytest --cov"),
         jira_base=os.environ.get("JIRA_BASE_URL", ""),
     )
-    sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
-    sys.stdout.write(body)
+    if args.output:
+        Path(args.output).write_text(body, encoding="utf-8", newline="\n")
+    else:
+        try:
+            sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        except (AttributeError, OSError):
+            pass
+        sys.stdout.buffer.write(body.encode("utf-8"))
     return 0
 
 

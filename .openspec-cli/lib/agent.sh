@@ -228,10 +228,24 @@ os_deliver_prompt_capture() {
     os_divider
     os_info "1. Open a NEW chat in $OS_AGENT_LABEL (do not continue an old thread)"
     os_info "2. Paste the prompt (Ctrl+V)"
-    os_info "3. Copy ONLY Copilot's final markdown reply"
-    os_info "   (start at '# Ticket enriquecido:' / '# Enriched Ticket:')"
-    os_info "4. Paste that reply into this file and save:"
-    os_info "   $OUTPUT_FILE"
+    case "$(basename "$OUTPUT_FILE")" in
+      .review-output.md)
+        os_info "3. Copilot must WRITE the full review to:"
+        os_info "   $OUTPUT_FILE"
+        os_info "   (or copy the markdown starting at '# Code Review:')"
+        os_info "4. Confirm the file ends with '## Final Verdict' + APPROVE/REQUEST CHANGES/COMMENT ONLY"
+        ;;
+      .enriched-content.md|*enriched*)
+        os_info "3. Copy ONLY Copilot's final markdown reply"
+        os_info "   (start at '# Ticket enriquecido:' / '# Enriched Ticket:')"
+        os_info "4. Paste that reply into this file and save:"
+        os_info "   $OUTPUT_FILE"
+        ;;
+      *)
+        os_info "3. Copy ONLY the agent's final markdown reply into:"
+        os_info "   $OUTPUT_FILE"
+        ;;
+    esac
     os_info "5. Press Enter here when the file is saved..."
     os_divider
     read -r _dummy
@@ -246,6 +260,18 @@ os_deliver_prompt_capture() {
       done
       printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
     fi
+
+    # Soft-validate review artifacts so empty/Q&A replies fail fast
+    case "$(basename "$OUTPUT_FILE")" in
+      .review-output.md)
+        if ! grep -qiE 'Final Verdict|\*\*(APPROVE|REQUEST CHANGES|COMMENT ONLY)\*\*' "$OUTPUT_FILE"; then
+          os_error "Review output has no Final Verdict."
+          os_info  "Copilot likely asked questions instead of writing the review."
+          os_info  "Re-run os-review in a NEW chat and insist on writing .review-output.md"
+          exit 1
+        fi
+        ;;
+    esac
   fi
 }
 
