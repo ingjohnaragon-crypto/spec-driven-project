@@ -44,7 +44,7 @@ JSONEOF
 os_step "Calling POST /v1/accounts ..."
 
 RESULT=$(curl -sf -X POST \
-    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d "${PAYLOAD}" \
     "${VAULT_BASE_URL}/v1/accounts")

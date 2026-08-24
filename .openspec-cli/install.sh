@@ -30,12 +30,30 @@ divider
 
 # ── Check dependencies ────────────────────────────────────────
 MISSING=0
-for dep in python3 curl git; do
+for dep in curl git; do
   if ! command -v "$dep" > /dev/null 2>&1; then
     error "Missing required dependency: $dep"
     MISSING=1
   fi
 done
+
+PYTHON_CMD=""
+for cmd in python py python3; do
+  if command -v "$cmd" > /dev/null 2>&1; then
+    ver=$("$cmd" -c 'import sys; print(sys.version_info.major)' 2>/dev/null || echo "")
+    if [ "$ver" = "3" ]; then
+      PYTHON_CMD="$cmd"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+  error "Python 3 not found (tried: py, python3, python)"
+  MISSING=1
+else
+  success "Found Python 3: $PYTHON_CMD"
+fi
 
 if ! command -v gh > /dev/null 2>&1; then
   warn "GitHub CLI (gh) not found — os-commit PR creation will be skipped."
@@ -45,6 +63,13 @@ fi
 if [ "$MISSING" = "1" ]; then
   error "Install missing dependencies and re-run."
   exit 1
+fi
+
+if "$PYTHON_CMD" -c 'from contracts_api import SmartContractDescriptor' > /dev/null 2>&1; then
+  success "Found: contracts_api SDK (Vault testing enabled)"
+else
+  warn "contracts_api not installed -- os-vault-test will not work"
+  warn "To install: cd contracts_sdk/contracts_sdk && $PYTHON_CMD -m pip install ."
 fi
 
 # ── Create install directory ──────────────────────────────────
@@ -61,6 +86,7 @@ done
 
 # ── Symlink commands ──────────────────────────────────────────
 for cmd_file in "$REPO_CLI_DIR/commands"/os-*; do
+  [ -f "$cmd_file" ] || continue
   cmd_name=$(basename "$cmd_file")
   target="$BIN_DIR/$cmd_name"
 
@@ -124,14 +150,31 @@ info "Reload your shell or run:"
 info "  source ~/.zshrc   (zsh)"
 info "  source ~/.bashrc  (bash)"
 divider
-label "  Available commands:"
-info "  os-plan           <TICKET-ID>            Generate implementation plan"
-info "  os-develop        <TICKET-ID>            Prepare implementation prompt + create branch"
-info "  os-commit         [TICKET-ID]            Commit, push and open PR"
-info "  os-enrich         <TICKET-ID>            Enrich Jira ticket with technical detail"
+label "  Core workflow:"
+info "  os-stack          [--list | <stack>]     Switch or list stacks"
+info "  os-agent          [--list | <agent>]     Switch or list AI agents"
+info "  os-enrich         <TICKET>               Enrich Jira ticket technically"
+info "  os-enrich-apply   <TICKET>               Upload enrichment to Jira"
 info "  os-language       [--list | <lang>]      Switch or list output language"
-info "  os-tickets        [status] [--project KEY] List project tickets"
-info "  os-create-ticket  [--hu] [--project KEY] [summary] [type] Create ticket"
+info "  os-plan           <TICKET>               Generate implementation plan"
+info "  os-develop        <TICKET>               Create branch + implementation"
+info "  os-commit         [TICKET]               Commit + push + open PR"
+info "  os-review         <PR>                   Generate AI code review"
+info "  os-review-apply   <PR>                   Publish review to GitHub"
+info "  os-review-fix     <PR>                   Fix review changes and re-review"
+divider
+label "  Jira management:"
+info "  os-tickets        [status]               List project tickets"
+info "  os-create-ticket  [--hu] [summary] [type] Create ticket"
+info "  os-transition     <TICKET> [status]      Move ticket to new status"
+divider
+label "  Vault Smart Contracts:"
+info "  os-vault-lint     [path]                 Validate Vault sandbox rules"
+info "  os-vault-test     [file] [--coverage]    Run tests with contracts_api SDK"
+info "  os-vault-simulate <contract.py> ...      Simulate against Vault sandbox"
+info "  os-vault-deploy   <contract.py> ...      Deploy to Vault as ProductVersion"
+info "  os-vault-account  <product_ver> <cust>   Create test account"
+info "  os-vault-balances <account_id>           Check live balances"
 divider
 label "  Setup:"
 info "  1. Copy .env.example to .env"
