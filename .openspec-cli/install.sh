@@ -47,19 +47,30 @@ info "Target : $INSTALL_DIR"
 
 # ── Check dependencies ────────────────────────────────────────
 MISSING=0
-if ! _os_has_python > /dev/null; then
-  error "Missing required dependency: Python 3 (tried: py, python3, python)"
-  MISSING=1
-else
-  success "Python   : $(_os_has_python)"
-fi
-
 for dep in curl git; do
   if ! command -v "$dep" > /dev/null 2>&1; then
     error "Missing required dependency: $dep"
     MISSING=1
   fi
 done
+
+PYTHON_CMD=""
+for cmd in python py python3; do
+  if command -v "$cmd" > /dev/null 2>&1; then
+    ver=$("$cmd" -c 'import sys; print(sys.version_info.major)' 2>/dev/null || echo "")
+    if [ "$ver" = "3" ]; then
+      PYTHON_CMD="$cmd"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+  error "Python 3 not found (tried: py, python3, python)"
+  MISSING=1
+else
+  success "Found Python 3: $PYTHON_CMD"
+fi
 
 if ! command -v gh > /dev/null 2>&1; then
   warn "GitHub CLI (gh) not found — os-commit PR creation will be skipped."
@@ -69,6 +80,13 @@ fi
 if [ "$MISSING" = "1" ]; then
   error "Install missing dependencies and re-run."
   exit 1
+fi
+
+if "$PYTHON_CMD" -c 'from contracts_api import SmartContractDescriptor' > /dev/null 2>&1; then
+  success "Found: contracts_api SDK (Vault testing enabled)"
+else
+  warn "contracts_api not installed -- os-vault-test will not work"
+  warn "To install: cd contracts_sdk/contracts_sdk && $PYTHON_CMD -m pip install ."
 fi
 
 # ── Create install directory ──────────────────────────────────
@@ -156,105 +174,57 @@ fi
 divider
 success "OpenSpec CLI installed / refreshed successfully!"
 divider
-info "Reload your shell or run:  source ~/.bashrc"
+info "Reload your shell or run:"
+info "  source ~/.zshrc   (zsh)"
+info "  source ~/.bashrc  (bash / Git Bash on Windows)"
 divider
-
-_has_cmd() {
-  printf '%s' "$INSTALLED_CMDS" | grep -qx "$1"
-}
-
-_print_cmd() {
-  # usage: _print_cmd <name> <usage> <description>
-  _has_cmd "$1" || return 0
-  info "  $1"
-  info "      $2"
-  info "      → $3"
-}
-
-label "  ── Setup / configuración ──"
-_print_cmd "os-stack" \
-  "os-stack [--list | <stack-name>]" \
-  "Activa o lista el stack (vault-smart-contracts, python-fastapi, …)"
-_print_cmd "os-agent" \
-  "os-agent [--list | <agent-name>]" \
-  "Activa o lista el agente (copilot, cursor, claude-code, …)"
-_print_cmd "os-language" \
-  "os-language [--list | <lang>]" \
-  "Cambia el idioma de salida (es / en)"
-
+label "  Multi-agent configuration (set once per project):"
+info "  os-stack          [--list | <stack>]       Tech stack → agent file + standards + tooling"
+info "  os-agent          [--list | <agent>]       AI agent → clipboard or CLI delivery"
+info "  os-language       [--list | <lang>]        Output language (en / es)"
 divider
-label "  ── Jira ──"
-_print_cmd "os-tickets" \
-  "os-tickets [status] [--project KEY]" \
-  "Lista tickets del proyecto Jira"
-_print_cmd "os-create-ticket" \
-  "os-create-ticket [--hu] [--project KEY] [summary] [type]" \
-  "Crea un ticket (opción --hu genera HU con IA)"
-_print_cmd "os-enrich" \
-  "os-enrich <TICKET-ID>" \
-  "Enriquece el ticket con detalle técnico (prompt → archivo)"
-_print_cmd "os-enrich-apply" \
-  "os-enrich-apply <TICKET-ID> [file]" \
-  "Sube el enriquecimiento a Jira (+ story points si aplica)"
-_print_cmd "os-transition" \
-  "os-transition <TICKET-ID> [--list | <estado>]" \
-  "Mueve el ticket de estado en Jira"
-
+label "  Core workflow (Jira ticket → PR):"
+info "  os-enrich         <TICKET>                 Build enrichment prompt (+ deliver to agent)"
+info "  os-enrich-apply   <TICKET> [file]          Upload enrichment to Jira"
+info "  os-plan           <TICKET>                 Plan prompt → planes/<TICKET>/<TICKET>_backend.md"
+info "  os-develop        <TICKET>                 Branch + implement (autonomous on CLI agents)"
+info "  os-commit         [TICKET]                 Commit, push, open PR → develop"
+info "  os-review         <PR>                     Review prompt → .review-output.md"
+info "  os-review-apply   <PR> [file]              Publish review on GitHub"
+info "  os-review-fix     <PR> [--no-commit]       Fix loop: apply review + re-review"
 divider
-label "  ── Desarrollo (workflow) ──"
-_print_cmd "os-plan" \
-  "os-plan <TICKET-ID>" \
-  "Genera el plan de implementación (ai-specs/changes/planes/…)"
-_print_cmd "os-develop" \
-  "os-develop <TICKET-ID>" \
-  "Crea rama feature/… y entrega el prompt de implementación"
-_print_cmd "os-commit" \
-  "os-commit [TICKET-ID]" \
-  "Commit + push + PR → develop (incluye plan/enriquecimiento)"
-
+label "  Jira management:"
+info "  os-tickets        [status] [--project KEY]  List tickets"
+info "  os-create-ticket  [--hu] [--project KEY] [summary] [type]"
+info "  os-transition     <TICKET> [--list | <state>]"
 divider
-label "  ── Code review (GitHub) ──"
-_print_cmd "os-review" \
-  "os-review <PR-NUMBER>" \
-  "Genera code review AI → .openspec-cli/.review-output.md"
-_print_cmd "os-review-apply" \
-  "os-review-apply <PR-NUMBER> [file]" \
-  "Publica el review en el PR (APPROVE / REQUEST CHANGES)"
-_print_cmd "os-review-fix" \
-  "os-review-fix <PR-NUMBER>" \
-  "Aplica fixes del review y re-genera re-review"
-
+label "  Vault Smart Contracts (when stack = vault-smart-contracts):"
+info "  os-vault-lint     [file|dir]               Sandbox restriction check"
+info "  os-vault-test     [file] [--coverage]      Lint + pytest (contracts_api SDK)"
+info "  os-vault-simulate <contract.py> [start] [end] [params_json]"
+info "  os-vault-deploy   <contract.py> <product_id> \"<display name>\""
+info "  os-vault-account  <product_version_id> <customer_id> [denomination]"
+info "  os-vault-balances <account_id>"
 divider
-label "  ── Vault Smart Contracts ──"
-_print_cmd "os-vault-lint" \
-  "os-vault-lint [contracts/ | file.py]" \
-  "Lint sandbox Vault (7 reglas: imports, float, ZoneInfo, …)"
-_print_cmd "os-vault-test" \
-  "os-vault-test [contracts/foo.py | tests/…] [--coverage]" \
-  "Lint + pytest; --coverage mide el contrato (>= 90%)"
-_print_cmd "os-vault-simulate" \
-  "os-vault-simulate <contract.py> [start] [end] [params_json]" \
-  "Simula el contrato contra Vault Core API"
-_print_cmd "os-vault-deploy" \
-  "os-vault-deploy <contract.py> <product_id> <name> [api]" \
-  "Despliega ProductVersion en Vault Core"
-_print_cmd "os-vault-account" \
-  "os-vault-account <product_version_id> <customer_id> [ccy]" \
-  "Crea cuenta de prueba ligada a un product version"
-_print_cmd "os-vault-balances" \
-  "os-vault-balances <account_id>" \
-  "Consulta balances en vivo de una cuenta Vault"
-
+label "  AI agents (openspec/config.yaml → agents:):"
+info "  copilot, cursor, windsurf  → clipboard (paste .openspec-cli/.last-prompt.md)"
+info "  claude-code, aider         → CLI (prompt sent automatically)"
 divider
-label "  Flujo típico Vault"
-info "  1. os-enrich KAN-XX && os-enrich-apply KAN-XX"
-info "  2. os-plan KAN-XX"
-info "  3. os-develop KAN-XX"
-info "  4. os-vault-lint contracts/<product>.py"
-info "  5. os-vault-test contracts/<product>.py --coverage"
-info "  6. os-commit KAN-XX"
-info "  7. os-review <PR> && os-review-apply <PR>"
+label "  Quick start — clipboard agent (Cursor / Copilot):"
+info "  1. cp .env.example .env && gh auth login"
+info "  2. os-stack vault-smart-contracts && os-agent cursor && os-language es"
+info "  3. os-enrich KAN-XX  → paste output → os-enrich-apply KAN-XX"
+info "  4. os-plan KAN-XX    → review ai-specs/changes/planes/KAN-XX/"
+info "  5. os-develop KAN-XX → os-vault-test --coverage && os-commit KAN-XX"
 divider
-info "Re-run after every git pull on main:"
-info "  sh .openspec-cli/install.sh && source ~/.bashrc"
+label "  Quick start — CLI agent (Claude Code / Aider):"
+info "  1. os-agent claude-code && os-stack vault-smart-contracts"
+info "  2. os-plan KAN-XX && os-develop KAN-XX   (implementation runs in terminal)"
+info "  3. os-vault-test --coverage && os-commit KAN-XX"
+info "  4. os-review <PR> && os-review-apply <PR>"
+divider
+label "  Working files (per agent session):"
+info "  .openspec-cli/.last-prompt.md       Last prompt built by any os-* command"
+info "  .openspec-cli/.enriched-content.md  Paste enrichment before os-enrich-apply"
+info "  .openspec-cli/.review-output.md     Review output (os-review / os-review-apply)"
 divider

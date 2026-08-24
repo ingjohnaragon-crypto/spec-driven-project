@@ -197,6 +197,9 @@ os-review 1              # AI code review
 os-review-apply 1        # publish review to GitHub
 ```
 
+On Windows, run these commands from Git Bash. PowerShell does not provide the
+`sh` command by default.
+
 ### Vault Smart Contracts quick start
 
 ```bash

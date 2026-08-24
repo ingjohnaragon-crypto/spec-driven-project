@@ -1,7 +1,50 @@
 # OpenSpec CLI
 
-Command-line tools that connect Jira tickets to your AI agent, resolving
-the active stack and AI agent automatically from `openspec/config.yaml`.
+Command-line tools that connect **Jira**, your **repository specs**, and **multiple AI agents**
+in a unified spec-driven workflow. Every `os-*` command resolves the active **stack**,
+**agent**, and **language** from `openspec/config.yaml` before building or delivering a prompt.
+
+---
+
+## Multi-agent model
+
+OpenSpec separates three independent choices:
+
+| Dimension | Command | What it controls |
+|---|---|---|
+| **Stack** | `os-stack <name>` | Tech context: agent role file, standards, lint/test/coverage commands |
+| **Agent** | `os-agent <name>` | How prompts are delivered: clipboard vs CLI |
+| **Language** | `os-language <code>` | Output language for plans, Jira, commits, PRs (`en` / `es`) |
+
+### Supported agents
+
+| Agent | Delivery | You do | Best for |
+|---|---|---|---|
+| `cursor` | Clipboard | Paste `.openspec-cli/.last-prompt.md` into Cursor | Interactive editing in IDE |
+| `copilot` | Clipboard | Paste into VS Code Copilot Chat | GitHub Copilot users |
+| `windsurf` | Clipboard | Paste into Windsurf | Windsurf users |
+| `claude-code` | CLI | Prompt runs automatically in terminal | Fully autonomous implement + review-fix |
+| `aider` | CLI | Prompt runs automatically in terminal | Terminal-first workflows |
+
+**Clipboard agents** — `os-plan`, `os-enrich`, `os-review` copy the prompt; you paste it,
+then save the AI output to the working files under `.openspec-cli/`.
+
+**CLI agents** — `os-develop` and `os-review-fix` run autonomously (code changes in the repo).
+
+### Supported stacks
+
+| Stack | Use case |
+|---|---|
+| `vault-smart-contracts` | Thought Machine Vault API 4.0 (this repo) |
+| `python-fastapi` | Python 3.12 + FastAPI |
+| `java-spring` | Java 17 + Spring Boot |
+| `node-express` | Node.js + Express |
+| `go-gin` | Go + Gin |
+| `frontend-react` | React + Vite |
+| `frontend-angular` | Angular |
+
+Vault stack auto-selects `plan-vault-contract.md`, `develop-vault-contract.md`, and
+`review-vault-pr.md` instead of the generic REST templates.
 
 ---
 
@@ -9,17 +52,20 @@ the active stack and AI agent automatically from `openspec/config.yaml`.
 
 ```bash
 sh .openspec-cli/install.sh
-source ~/.bashrc
+source ~/.bashrc    # or ~/.zshrc
 ```
+
+Re-run after pulling CLI updates to refresh `~/.openspec/lib`.
 
 ### Dependencies
 
 | Tool | Required | Purpose |
 |---|---|---|
-| `python3` / `py` | Yes | YAML parsing, Jira API, config resolution |
-| `curl` | Yes | HTTP requests to Jira |
-| `git` | Yes | Branch and commit operations |
-| `gh` | Recommended | PR creation and review (`os-commit`, `os-review-apply`) |
+| `python3` / `py` | Yes | Config parsing, Jira API, vault lint |
+| `curl` | Yes | Jira + Vault HTTP |
+| `git` | Yes | Branches and commits |
+| `gh` | Recommended | PR creation and review publish |
+| `contracts_api` | Vault only | `cd contracts_sdk/contracts_sdk && pip install .` |
 
 ---
 
@@ -27,188 +73,107 @@ source ~/.bashrc
 
 ```bash
 cp .env.example .env
-# Edit .env with your Jira credentials
+# JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN, JIRA_PROJECT_KEY
+# VAULT_* optional — for os-vault-simulate/deploy/account
 gh auth login
-```
-
-`.env` file:
-```
-JIRA_BASE_URL=https://your-org.atlassian.net
-JIRA_EMAIL=your@email.com
-JIRA_TOKEN=your_jira_api_token
+os-stack --list && os-stack vault-smart-contracts
+os-agent --list && os-agent cursor        # or claude-code
+os-language --list && os-language es      # optional
 ```
 
 ---
 
 ## Complete workflow
 
+### Clipboard agent (Cursor / Copilot / Windsurf)
+
 ```bash
-# 1. Select your AI agent and stack
-os-agent --list
-os-agent copilot          # or claude-code, cursor, windsurf, aider
-os-stack --list
-os-stack python-fastapi
+os-enrich KAN-XX
+# → paste AI output into ai-specs/changes/enriquecimientos/KAN-XX/ or .enriched-content.md
+os-enrich-apply KAN-XX
 
-# 2. Enrich the Jira ticket with technical detail
-os-enrich KAN-6
-cat .openspec-cli/.last-prompt.md | clip   # Windows
-# Paste into your AI agent → copy output
+os-plan KAN-XX
+# → AI saves plan to ai-specs/changes/planes/KAN-XX/KAN-XX_backend.md
 
-# 3. Save output and upload to Jira
-notepad .openspec-cli/.enriched-content.md  # paste AI output here
-os-enrich-apply KAN-6                        # uploads to Jira automatically
+os-develop KAN-XX
+# → creates feature/KAN-XX-backend; paste prompt if clipboard agent
 
-# 4. Generate implementation plan
-os-plan KAN-6
-# Prompt is delivered automatically to your active agent
-# → AI generates ai-specs/changes/planes/KAN-6/KAN-6_backend.md
+os-vault-test --coverage                  # Vault stack
+os-commit KAN-XX
 
-# 5. Implement
-os-develop KAN-6
-# → AI implements step by step on branch feature/KAN-6-backend
+os-review 20
+os-review-apply 20
+```
 
-# 6. Commit and open PR
-os-commit KAN-6
+### CLI agent (Claude Code / Aider)
 
-# 7. Review the PR
-os-review 1
-notepad .openspec-cli/.review-output.md     # paste AI review output here
-os-review-apply 1                            # publishes review to GitHub
+```bash
+os-agent claude-code
+os-plan KAN-XX          # prompt delivered automatically
+os-develop KAN-XX       # implementation runs in terminal
+os-vault-test --coverage
+os-commit KAN-XX
+os-review 20 && os-review-apply 20
+os-review-fix 20        # auto-fix REQUEST CHANGES + re-review
 ```
 
 ---
 
-## Commands
+## Commands reference
 
-### `os-agent [--list | <agent-name>]`
-
-Lists available AI agents or switches the active agent.
+### Configuration
 
 ```bash
-os-agent --list          # show all agents with delivery method
-os-agent copilot         # clipboard delivery (paste manually in VS Code)
-os-agent cursor          # clipboard delivery (paste manually in Cursor)
-os-agent windsurf        # clipboard delivery (paste manually in Windsurf)
-os-agent claude-code     # CLI delivery (sends prompt directly via terminal)
-os-agent aider           # CLI delivery (sends prompt directly via terminal)
+os-stack [--list | <stack>]
+os-agent [--list | <agent>]
+os-language [--list | en|es]
 ```
 
-### `os-stack [--list | <stack-name>]`
-
-Lists available stacks or switches the active stack.
+### Jira
 
 ```bash
-os-stack --list           # show all stacks
-os-stack python-fastapi   # switch to Python/FastAPI
-os-stack java-spring      # switch to Java/Spring Boot
-os-stack node-express     # switch to Node.js/Express
-os-stack go-gin           # switch to Go/Gin
-os-stack frontend-react   # switch to React + Vite
-os-stack frontend-angular # switch to Angular
-os-stack vault-smart-contracts
+os-tickets [status] [--project KEY]
+os-create-ticket [--hu] [--project KEY] [summary] [type]
+os-transition <TICKET> [--list | <state>]
+os-enrich <TICKET>
+os-enrich-apply <TICKET> [file]
 ```
 
-### `os-language [--list | <language-code>]`
-
-Switches the output language for plans, enrichments, reviews, commits and PRs.
+### Development workflow
 
 ```bash
-os-language --list
-os-language en
-os-language es
+os-plan <TICKET>              # plan prompt → planes/<TICKET>/
+os-develop <TICKET>           # branch + implement
+os-commit [TICKET]            # commit + PR → develop
+os-review <PR>                # review → .review-output.md
+os-review-apply <PR> [file]   # publish to GitHub
+os-review-fix <PR>            # fix loop (CLI agents)
 ```
 
-### `os-plan <TICKET-ID>`
-
-Fetches Jira ticket, resolves active stack + agent, delivers implementation
-plan prompt to the configured agent.
+### Vault Smart Contracts
 
 ```bash
-os-plan KAN-6
-# Clipboard agents: cat .openspec-cli/.last-prompt.md | clip
-# CLI agents: prompt is sent automatically
-```
-
-### `os-develop <TICKET-ID>`
-
-Creates the feature branch and delivers the implementation prompt.
-
-```bash
-os-develop KAN-6
-# Creates branch: feature/KAN-6-backend
-```
-
-### `os-enrich <TICKET-ID>`
-
-Builds a prompt to enrich the Jira ticket with technical detail.
-
-```bash
-os-enrich KAN-6
-```
-
-### `os-enrich-apply <TICKET-ID> [file]`
-
-Uploads enriched content to Jira ticket description.
-
-```bash
-notepad .openspec-cli/.enriched-content.md  # paste AI output here
-os-enrich-apply KAN-6
-os-enrich-apply KAN-6 my-content.md         # or specify a custom file
-```
-
-### `os-review <PR-NUMBER>`
-
-Downloads the PR diff and builds a structured code review prompt.
-
-```bash
-os-review 1
-notepad .openspec-cli/.review-output.md     # paste AI review output here
-```
-
-### `os-review-apply <PR-NUMBER> [file]`
-
-Publishes the AI review as a GitHub PR comment and applies verdict
-(approve / request changes).
-
-```bash
-os-review-apply 1
-os-review-apply 1 my-review.md             # or specify a custom file
-```
-
-### `os-commit [TICKET-ID]`
-
-Stages relevant changes, generates a conventional commit message,
-pushes and opens a PR via GitHub CLI.
-
-```bash
-os-commit KAN-6
-os-commit        # ticket ID inferred from branch name
+os-vault-lint [file|dir]
+os-vault-test [file] [--coverage]
+os-vault-simulate contracts/<product>.py [start] [end] ['{"param":"val"}']
+os-vault-deploy contracts/<product>.py <product_id> "<display name>"
+os-vault-account <product_version_id> <customer_id> [denomination]
+os-vault-balances <account_id>
 ```
 
 ---
 
-## Switching stacks
+## Working files
 
-One command changes everything — agent file, standards, and tooling commands:
+| File | Purpose |
+|---|---|
+| `.openspec-cli/.last-prompt.md` | Last prompt built (all commands) |
+| `.openspec-cli/.enriched-content.md` | Fallback before `os-enrich-apply` |
+| `.openspec-cli/.review-output.md` | Review before `os-review-apply` |
+| `ai-specs/changes/planes/<TICKET>/` | Implementation plans |
+| `ai-specs/changes/enriquecimientos/<TICKET>/` | Enriched tickets |
 
-| Stack | Label | Test command |
-|---|---|---|
-| `java-spring` | Java 17 + Spring Boot | `./gradlew test` |
-| `python-fastapi` | Python 3.12 + FastAPI | `pytest` |
-| `node-express` | Node.js + Express | `npm test` |
-| `go-gin` | Go + Gin | `go test ./...` |
-| `frontend-react` | React + Vite | `npm test` |
-| `frontend-angular` | Angular | `ng test --watch=false` |
-
-## Switching AI agents
-
-| Agent | Delivery | Requires |
-|---|---|---|
-| `copilot` | Clipboard — paste manually | GitHub Copilot in VS Code |
-| `cursor` | Clipboard — paste manually | Cursor editor |
-| `windsurf` | Clipboard — paste manually | Windsurf editor |
-| `claude-code` | CLI — automatic | `claude` CLI installed |
-| `aider` | CLI — automatic | `aider` installed |
+GitHub is the archive for reviews and PRs — not local `ai-specs/changes/` review files.
 
 ---
 
@@ -216,14 +181,12 @@ One command changes everything — agent file, standards, and tooling commands:
 
 | Problem | Solution |
 |---|---|
-| `command not found` | Run `source ~/.bashrc` or add `~/.openspec/bin` to PATH |
-| `openspec/config.yaml not found` | Run commands from inside the project repo |
-| `.env not found` | Run `cp .env.example .env` and fill in values |
-| Jira 404 error | Verify ticket exists: run with a known ticket ID |
-| Clipboard not working (Windows) | Use `cat .openspec-cli/.last-prompt.md \| clip` |
-| Stack fields show wrong stack | Run `sh .openspec-cli/install.sh` to reinstall |
-| Agent command not found | Install the CLI tool or switch to `copilot`: `os-agent copilot` |
-| Python not found | Install Python 3 and ensure `py`, `python3` or `python` is in PATH |
+| `command not found` | `source ~/.bashrc` or add `~/.openspec/bin` to PATH |
+| Outdated install banner | Re-run `sh .openspec-cli/install.sh` |
+| Stack standards empty | Check `openspec/config.yaml` standards path exists |
+| Clipboard on Windows | `cat .openspec-cli/.last-prompt.md \| clip` |
+| `os-vault-test` fails | Install SDK: `pip install contracts_sdk/contracts_sdk/.` |
+| Agent CLI not found | Switch to clipboard: `os-agent cursor` |
 
 ---
 
@@ -231,31 +194,20 @@ One command changes everything — agent file, standards, and tooling commands:
 
 ```
 .openspec-cli/
-├── install.sh                   Install/update the CLI globally
-├── README.md                    This file
-├── .last-prompt.md              Last generated prompt (auto-updated by every command)
-├── .enriched-content.md         Paste AI enrichment output here before os-enrich-apply
-├── .review-output.md            Paste AI review output here before os-review-apply
+├── install.sh              Canonical installer (run this)
+├── README.md               This file
 ├── lib/
-│   ├── colors.sh                Terminal color and print helpers
-│   ├── config.sh                Reads and resolves openspec/config.yaml
-│   ├── agent.sh                 Resolves active AI agent and delivers prompts
-│   │                            (os_deliver_prompt / autonomous / capture)
-│   ├── language.sh              Resolves active output language
-│   ├── jira.sh                  Jira Cloud REST API v3 helpers
-│   ├── parse_config.py          Python YAML parser for stack fields
-│   ├── parse_agent.py           Python YAML parser for agent fields
-│   ├── parse_language.py        Python YAML parser for language fields
-│   └── parse_stack.py           Python parser for active stack name
+│   ├── agent.sh            Prompt delivery (clipboard / CLI / capture)
+│   ├── config.sh           Stack + template resolution
+│   ├── language.sh         Active language
+│   ├── jira.sh             Jira REST helpers
+│   ├── vault_lint.py       Sandbox AST linter
+│   └── parse_*.py          YAML parsers
 └── commands/
-    ├── os-agent                 Switch active AI agent
-    ├── os-stack                 Switch active tech stack
-    ├── os-language              Switch active output language
-    ├── os-plan                  Generate implementation plan prompt
-    ├── os-develop               Create branch + implementation prompt
-    ├── os-enrich                Generate ticket enrichment prompt
-    ├── os-enrich-apply          Upload enriched content to Jira
-    ├── os-review                Generate PR code review prompt
-    ├── os-review-apply          Publish review to GitHub PR
-    └── os-commit                Commit, push and open PR
+    ├── os-stack / os-agent / os-language
+    ├── os-enrich / os-enrich-apply
+    ├── os-plan / os-develop / os-commit
+    ├── os-review / os-review-apply / os-review-fix
+    ├── os-tickets / os-create-ticket / os-transition
+    └── os-vault-lint / os-vault-test / os-vault-simulate / …
 ```

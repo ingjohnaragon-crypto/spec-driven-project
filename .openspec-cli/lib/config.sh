@@ -1,7 +1,12 @@
 #!/bin/sh
 
 _os_find_python() {
-  for cmd in py python3 python; do
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    for candidate in "$VIRTUAL_ENV/Scripts/python.exe" "$VIRTUAL_ENV/bin/python"; do
+      if [ -f "$candidate" ]; then echo "$candidate"; return 0; fi
+    done
+  fi
+  for cmd in python py python3; do
     if command -v "$cmd" > /dev/null 2>&1; then
       result=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "")
       if [ "$result" = "3" ]; then echo "$cmd"; return 0; fi
@@ -23,7 +28,11 @@ os_load_config() {
   OS_REPO_ROOT="$(_os_find_root)"
   if [ -z "$OS_REPO_ROOT" ]; then os_error "openspec/config.yaml not found."; exit 1; fi
   OS_CONFIG="$OS_REPO_ROOT/openspec/config.yaml"
-  OS_PYTHON="$(_os_find_python 2>/dev/null || true)"
+  if [ -f "$OS_REPO_ROOT/.venv/Scripts/python.exe" ]; then
+    OS_PYTHON="$OS_REPO_ROOT/.venv/Scripts/python.exe"
+  else
+    OS_PYTHON="$(_os_find_python 2>/dev/null || true)"
+  fi
   PARSER="$HOME/.openspec/lib/parse_config.py"
   result=$($OS_PYTHON "$PARSER" "$OS_CONFIG" 2>/dev/null)
   OS_ACTIVE_STACK=$($OS_PYTHON "$HOME/.openspec/lib/parse_stack.py" "$OS_CONFIG" 2>/dev/null)
