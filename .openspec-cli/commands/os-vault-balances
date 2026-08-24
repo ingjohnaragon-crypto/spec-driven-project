@@ -18,7 +18,7 @@ os_print_separator
 os_print_info "Account: ${ACCOUNT_ID}"
 
 RESULT=$(curl -sf \
-    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     "${VAULT_BASE_URL}/v2/balances/live?account_ids=${ACCOUNT_ID}")
 
