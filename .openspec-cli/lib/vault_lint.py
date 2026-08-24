@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import argparse
 import ast
+import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +15,7 @@ FORBIDDEN_IMPORTS: set[str] = {
     "traceback", "threading", "subprocess", "requests", "http", "urllib",
 }
 
-ALLOWED_TOP_LEVEL_IMPORTS: set[str] = {"contracts_api", "decimal"}
+ALLOWED_TOP_LEVEL_IMPORTS: set[str] = {"contracts_api", "decimal", "zoneinfo"}
 
 FORBIDDEN_CALLS: set[str] = {
     "eval", "exec", "compile", "__import__",
@@ -30,6 +32,62 @@ CONTRACT_ALLOWED_GLOBALS: set[str] = {
     "balance_observation_fetchers",
     "DEFAULT_ADDRESS", "DEFAULT_ASSET",
 }
+
+BALANCE_VALUE_NAMES: set[str] = {"balance", "bal", "value"}
+
+# Display checklist — label + violation rule codes that fail it
+DISPLAY_RULES: tuple[tuple[str, frozenset[str]], ...] = (
+    ("No stdlib imports detected", frozenset({"FORBIDDEN_IMPORT", "UNKNOWN_IMPORT"})),
+    ("No eval/exec/globals/locals", frozenset({"FORBIDDEN_CALL", "EXCEPTION_CHAINING"})),
+    ("No mutable global state", frozenset({"MUTABLE_GLOBAL"})),
+    ("Decimal used (not float)", frozenset({"FLOAT_USED"})),
+    ("ZoneInfo used (not timezone.utc)", frozenset({"TIMEZONE_UTC"})),
+    ("No client_transaction_id", frozenset({"CLIENT_TRANSACTION_ID"})),
+    ("Phase read from BalanceCoordinate", frozenset({"PHASE_ON_BALANCE"})),
+)
+
+_GREEN = "\033[0;32m"
+_RED = "\033[0;31m"
+_CYAN = "\033[0;36m"
+_BOLD = "\033[1m"
+_RESET = "\033[0m"
+
+
+def _enable_windows_vt() -> bool:
+    """Enable ANSI VT mode on Windows conhost/Windows Terminal. Returns True if enabled."""
+    if sys.platform != "win32":
+        return True
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return False
+        return bool(kernel32.SetConsoleMode(handle, mode.value | 0x0004))
+    except (AttributeError, OSError, ValueError):
+        return False
+
+
+def _use_color() -> bool:
+    if os.environ.get("NO_COLOR"):
+        return False
+    if os.environ.get("FORCE_COLOR"):
+        return True
+    if not sys.stdout.isatty():
+        return False
+    # On Windows, Python often emits ANSI that Git Bash/cmd show as "←[0;32m".
+    # Only color when the console actually accepts VT sequences.
+    if sys.platform == "win32":
+        return _enable_windows_vt()
+    return True
+
+
+def _c(code: str, text: str) -> str:
+    if not _use_color():
+        return text
+    return f"{code}{text}{_RESET}"
 
 
 @dataclass
@@ -64,7 +122,7 @@ class VaultLintVisitor(ast.NodeVisitor):
                     node,
                     "UNKNOWN_IMPORT",
                     f"import {alias.name!r} is not in the allowed list "
-                    f"(allowed: contracts_api, decimal)",
+                    f"(allowed: contracts_api, decimal, zoneinfo)",
                 )
         self.generic_visit(node)
 
@@ -87,6 +145,47 @@ class VaultLintVisitor(ast.NodeVisitor):
                 node,
                 "FORBIDDEN_CALL",
                 f"call to {node.func.id!r} is not allowed in contracts",
+            )
+        if isinstance(node.func, ast.Name) and node.func.id == "float":
+            self._add(node, "FLOAT_USED", "use Decimal instead of float()")
+        for kw in node.keywords:
+            if kw.arg == "client_transaction_id":
+                self._add(
+                    node,
+                    "CLIENT_TRANSACTION_ID",
+                    "client_transaction_id is not allowed — use instruction_details",
+                )
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant) -> None:
+        if isinstance(node.value, float):
+            self._add(
+                node,
+                "FLOAT_USED",
+                f"float literal {node.value!r} is forbidden — use Decimal",
+            )
+        self.generic_visit(node)
+
+    def visit_Attribute(self, node: ast.Attribute) -> None:
+        if (
+            isinstance(node.value, ast.Name)
+            and node.value.id == "timezone"
+            and node.attr == "utc"
+        ):
+            self._add(
+                node,
+                "TIMEZONE_UTC",
+                "timezone.utc is forbidden — use ZoneInfo('UTC')",
+            )
+        if (
+            isinstance(node.value, ast.Name)
+            and node.value.id in BALANCE_VALUE_NAMES
+            and node.attr == "phase"
+        ):
+            self._add(
+                node,
+                "PHASE_ON_BALANCE",
+                f"read phase from BalanceCoordinate (key), not from {node.value.id!r}",
             )
         self.generic_visit(node)
 
@@ -140,7 +239,65 @@ def lint_directory(directory: Path) -> list[Violation]:
     return violations
 
 
+def collect_targets(target_strs: list[str]) -> list[Path] | None:
+    """Resolve CLI targets to concrete .py files. Returns None if a target is missing."""
+    files: list[Path] = []
+    for target_str in target_strs:
+        target = Path(target_str)
+        if target.is_dir():
+            files.extend(sorted(target.glob("*.py")))
+        elif target.is_file():
+            files.append(target)
+        else:
+            print(f"ERROR: target not found: {target}", file=sys.stderr)
+            return None
+    return files
+
+
+def _print_checklist(violations: list[Violation], elapsed_s: float) -> int:
+    """Print the Vault rules checklist. Returns number of failed display rules."""
+    print("Checking Vault sandbox restrictions...")
+    failed_rules = 0
+    total = len(DISPLAY_RULES)
+    violated_codes = {v.rule for v in violations}
+
+    for label, codes in DISPLAY_RULES:
+        ok = violated_codes.isdisjoint(codes)
+        if ok:
+            print(_c(_GREEN, f"  ✔ {label}"))
+        else:
+            failed_rules += 1
+            print(_c(_RED, f"  ✖ {label}"))
+
+    print(_c(_CYAN, "────────────────────────────────────────────"))
+
+    passed = total - failed_rules
+    if failed_rules == 0:
+        summary = f"✔ {passed}/{total} Vault rules — CLEAN"
+        print(f"{_c(_GREEN + _BOLD, summary)}                    ⏱ {elapsed_s:.2f}s")
+    else:
+        summary = f"✖ {passed}/{total} Vault rules — FAILED"
+        print(f"{_c(_RED + _BOLD, summary)}                   ⏱ {elapsed_s:.2f}s")
+
+    if violations:
+        print()
+        for v in violations:
+            print(v)
+
+    return failed_rules
+
+
+def _configure_stdout() -> None:
+    """Avoid UnicodeEncodeError on Windows consoles (cp1252) for ✔/✖/⏱."""
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_stdout()
     parser = argparse.ArgumentParser(description="Vault Python sandbox restriction linter")
     parser.add_argument(
         "targets",
@@ -150,26 +307,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    all_violations: list[Violation] = []
-    for target_str in args.targets:
-        target = Path(target_str)
-        if target.is_dir():
-            all_violations.extend(lint_directory(target))
-        elif target.is_file():
-            all_violations.extend(lint_file(target))
-        else:
-            print(f"ERROR: target not found: {target}", file=sys.stderr)
-            return 1
-
-    for v in all_violations:
-        print(v)
-
-    if all_violations:
-        print(f"\n{len(all_violations)} violation(s) found.", file=sys.stderr)
+    files = collect_targets(args.targets)
+    if files is None:
         return 1
 
-    print("No violations found.")
-    return 0
+    if not files:
+        print("ERROR: no .py files found in target(s).", file=sys.stderr)
+        return 1
+
+    started = time.perf_counter()
+    all_violations: list[Violation] = []
+    for path in files:
+        all_violations.extend(lint_file(path))
+    elapsed = time.perf_counter() - started
+
+    failed_rules = _print_checklist(all_violations, elapsed)
+    return 1 if failed_rules or all_violations else 0
 
 
 if __name__ == "__main__":

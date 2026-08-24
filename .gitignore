@@ -75,3 +75,11 @@ venv/
 .openspec-cli/.*.applied
 .openspec-cli/.last-prompt.md
 .openspec-cli/.pr-diff.patch
+.openspec-cli/.pr-body.md
+.openspec-cli/.pr-body-from-gh.md
+.openspec-cli/.pr-api.json
+.openspec-cli/.review-output.md
+.openspec-cli/.review-publish.md
+.openspec-cli/.enriched-content.md
+.openspec-cli/.fix-prompt.md
+.openspec-cli/staged.tmp

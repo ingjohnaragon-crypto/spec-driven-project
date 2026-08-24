@@ -22,7 +22,11 @@ os_load_env
 CONTRACT_FILE="${1:-}"
 START_TS="${2:-}"
 END_TS="${3:-}"
-PARAM_VALS="${4:-{}}"
+if [ -z "${4:-}" ]; then
+    PARAM_VALS="{}"
+else
+    PARAM_VALS="$4"
+fi
 
 if [ -z "${CONTRACT_FILE}" ]; then
     os_print_error "Usage: os-vault-simulate <contract_file> [start_ts] [end_ts] [param_vals_json]"
@@ -57,6 +61,8 @@ trap "rm -f ${PAYLOAD_FILE}" EXIT
     "${END_TS}" \
     "${PARAM_VALS}" > "${PAYLOAD_FILE}"
 
+cp "${PAYLOAD_FILE}" /tmp/last-simulate-payload.json
+
 os_step "Calling POST /v1/contracts:simulate ..."
 
 RESULT_FILE=$(mktemp /tmp/os-vault-result-XXXXXX.json)
@@ -64,10 +70,16 @@ trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
 
 HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
     -X POST \
-    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d @"${PAYLOAD_FILE}" \
     "${VAULT_BASE_URL}/v1/contracts:simulate")
+
+ls -la "${RESULT_FILE}"
+wc -c "${RESULT_FILE}"
+echo "── Primeros 300 caracteres del RESULT_FILE:"
+head -c 300 "${RESULT_FILE}"
+echo ""
 
 if [ "${HTTP_STATUS}" != "200" ]; then
     os_print_error "Simulation failed (HTTP ${HTTP_STATUS}):"
@@ -79,45 +91,4 @@ os_print_success "Simulation completed (HTTP 200)"
 os_print_separator
 
 # ── Parse and display results ─────────────────────────────────
-"${OS_PYTHON}" << PYEOF
-import json, sys
-
-with open("${RESULT_FILE}") as f:
-    result = json.load(f)
-
-# Logs
-logs = result.get("logs", [])
-if logs:
-    print("\n SIMULATION LOGS:")
-    for log in logs[-10:]:  # last 10 log entries
-        print(f"  {log}")
-
-# Balances
-balances = result.get("balances", {})
-if balances:
-    print("\n BALANCES:")
-    for acct_id, bal_map in balances.items():
-        print(f"  Account: {acct_id}")
-        for key, bal in bal_map.items():
-            print(f"    {key}: {bal.get('net','?')} {bal.get('denomination','')}")
-
-# Posting batches
-pibs = result.get("posting_instruction_batches", [])
-print(f"\n POSTING BATCHES GENERATED: {len(pibs)}")
-for pib in pibs[:5]:
-    print(f"  - {pib.get('id','?')} status={pib.get('status','?')}")
-
-# Hook execution logs
-hook_logs = result.get("hook_execution_logs", [])
-if hook_logs:
-    print(f"\n HOOK EXECUTIONS: {len(hook_logs)}")
-    for hl in hook_logs[:5]:
-        print(f"  - hook={hl.get('hook_id','?')} result={hl.get('result','?')}")
-
-# Save full result
-with open("${OS_REPO_ROOT}/.openspec-cli/.last-simulation.json", "w") as f:
-    json.dump(result, f, indent=2)
-print(f"\n Full result saved to: .openspec-cli/.last-simulation.json")
-PYEOF
-
-os_print_separator
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_simulate_print_result.py" "${RESULT_FILE}" "${OS_REPO_ROOT}"

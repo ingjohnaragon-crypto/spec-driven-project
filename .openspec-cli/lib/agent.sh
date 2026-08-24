@@ -77,9 +77,21 @@ os_agent_run() {
 # ── Low-level: copy a file's content to the system clipboard ─
 # Usage: os_copy_to_clipboard <file>  → 0 if copied, 1 if no
 # clipboard tool was found (Windows/macOS/Linux X11).
+# On Windows, prefer PowerShell UTF-8 → clipboard to avoid mojibake
+# when pasting into Copilot / VS Code.
 os_copy_to_clipboard() {
   _FILE="$1"
+  if command -v powershell.exe > /dev/null 2>&1; then
+    # -LiteralPath + UTF8 keeps Spanish accents and markdown intact
+    powershell.exe -NoProfile -Command \
+      "Get-Content -LiteralPath '$(_winpath "$_FILE")' -Raw -Encoding utf8 | Set-Clipboard" \
+      > /dev/null 2>&1 && return 0
+  fi
   if command -v clip.exe > /dev/null 2>&1; then
+    # Fallback: UTF-8 → UTF-16LE for clip.exe
+    if command -v iconv > /dev/null 2>&1; then
+      iconv -f utf-8 -t utf-16le "$_FILE" | clip.exe && return 0
+    fi
     cat "$_FILE" | clip.exe && return 0
   elif command -v pbcopy > /dev/null 2>&1; then
     cat "$_FILE" | pbcopy && return 0
@@ -89,6 +101,16 @@ os_copy_to_clipboard() {
     cat "$_FILE" | xsel --clipboard --input && return 0
   fi
   return 1
+}
+
+# Convert a Git-Bash / POSIX path to a Windows path for PowerShell.
+_winpath() {
+  if command -v cygpath > /dev/null 2>&1; then
+    cygpath -w "$1"
+  else
+    # /c/foo/bar → C:/foo/bar
+    echo "$1" | sed -E 's|^/([a-zA-Z])/|\1:/|'
+  fi
 }
 
 # ── Deliver prompt to the active agent (fire-and-forget) ─────
@@ -180,9 +202,9 @@ os_deliver_prompt_autonomous() {
 # Used when the agent's reply itself is the artifact (os-enrich,
 # os-review, os-create-ticket --hu).
 #   - CLI agents: run and capture stdout automatically.
-#   - Clipboard agents: copy the prompt, then read the pasted
-#     response from the user (CTRL+D on Unix, CTRL+Z+Enter on
-#     Windows) into output_file.
+#   - Clipboard agents (Copilot/Cursor): copy the prompt, then ask
+#     the user to paste the reply into output_file (editor), which
+#     avoids terminal encoding corruption on Windows.
 os_deliver_prompt_capture() {
   PROMPT_FILE="$1"
   OUTPUT_FILE="$2"
@@ -191,23 +213,65 @@ os_deliver_prompt_capture() {
     os_step "Sending prompt to $OS_AGENT_LABEL..."
     os_agent_run "$PROMPT_FILE" "$OUTPUT_FILE"
   else
+    # Start from an empty capture file so the user pastes cleanly
+    : > "$OUTPUT_FILE"
+
     if os_copy_to_clipboard "$PROMPT_FILE"; then
-      os_success "Prompt copied to clipboard!"
+      os_success "Prompt copied to clipboard (UTF-8)!"
     else
       os_warn "Clipboard not available — copy manually:"
-      os_info "  cat $PROMPT_FILE | clip"
+      os_info "  cat $PROMPT_FILE"
     fi
-    os_info "1. Paste in $OS_AGENT_LABEL"
-    os_info "2. Copy the AI output"
-    os_info "3. Press Enter here when ready..."
+
+    os_divider
+    os_label "  Clipboard agent — $OS_AGENT_LABEL"
+    os_divider
+    os_info "1. Open a NEW chat in $OS_AGENT_LABEL (do not continue an old thread)"
+    os_info "2. Paste the prompt (Ctrl+V)"
+    case "$(basename "$OUTPUT_FILE")" in
+      .review-output.md)
+        os_info "3. Copilot must WRITE the full review to:"
+        os_info "   $OUTPUT_FILE"
+        os_info "   (or copy the markdown starting at '# Code Review:')"
+        os_info "4. Confirm the file ends with '## Final Verdict' + APPROVE/REQUEST CHANGES/COMMENT ONLY"
+        ;;
+      .enriched-content.md|*enriched*)
+        os_info "3. Copy ONLY Copilot's final markdown reply"
+        os_info "   (start at '# Ticket enriquecido:' / '# Enriched Ticket:')"
+        os_info "4. Paste that reply into this file and save:"
+        os_info "   $OUTPUT_FILE"
+        ;;
+      *)
+        os_info "3. Copy ONLY the agent's final markdown reply into:"
+        os_info "   $OUTPUT_FILE"
+        ;;
+    esac
+    os_info "5. Press Enter here when the file is saved..."
+    os_divider
     read -r _dummy
-    os_step "Paste the response (CTRL+Z + Enter to finish on Windows, CTRL+D on Unix):"
-    OUTPUT=""
-    while IFS= read -r line; do
-      OUTPUT="${OUTPUT}${line}
+
+    if [ ! -s "$OUTPUT_FILE" ]; then
+      os_warn "File is empty. Falling back to terminal paste."
+      os_step "Paste the response (CTRL+Z + Enter on Windows, CTRL+D on Unix):"
+      OUTPUT=""
+      while IFS= read -r line; do
+        OUTPUT="${OUTPUT}${line}
 "
-    done
-    printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
+      done
+      printf '%s' "$OUTPUT" > "$OUTPUT_FILE"
+    fi
+
+    # Soft-validate review artifacts so empty/Q&A replies fail fast
+    case "$(basename "$OUTPUT_FILE")" in
+      .review-output.md)
+        if ! grep -qiE 'Final Verdict|\*\*(APPROVE|REQUEST CHANGES|COMMENT ONLY)\*\*' "$OUTPUT_FILE"; then
+          os_error "Review output has no Final Verdict."
+          os_info  "Copilot likely asked questions instead of writing the review."
+          os_info  "Re-run os-review in a NEW chat and insist on writing .review-output.md"
+          exit 1
+        fi
+        ;;
+    esac
   fi
 }
 

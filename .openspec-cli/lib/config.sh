@@ -1,7 +1,12 @@
 #!/bin/sh
 
 _os_find_python() {
-  for cmd in py python3 python; do
+  if [ -n "${VIRTUAL_ENV:-}" ]; then
+    for candidate in "$VIRTUAL_ENV/Scripts/python.exe" "$VIRTUAL_ENV/bin/python"; do
+      if [ -f "$candidate" ]; then echo "$candidate"; return 0; fi
+    done
+  fi
+  for cmd in python py python3; do
     if command -v "$cmd" > /dev/null 2>&1; then
       result=$("$cmd" -c "import sys; print(sys.version_info.major)" 2>/dev/null || echo "")
       if [ "$result" = "3" ]; then echo "$cmd"; return 0; fi
@@ -23,7 +28,11 @@ os_load_config() {
   OS_REPO_ROOT="$(_os_find_root)"
   if [ -z "$OS_REPO_ROOT" ]; then os_error "openspec/config.yaml not found."; exit 1; fi
   OS_CONFIG="$OS_REPO_ROOT/openspec/config.yaml"
-  OS_PYTHON="$(_os_find_python 2>/dev/null || true)"
+  if [ -f "$OS_REPO_ROOT/.venv/Scripts/python.exe" ]; then
+    OS_PYTHON="$OS_REPO_ROOT/.venv/Scripts/python.exe"
+  else
+    OS_PYTHON="$(_os_find_python 2>/dev/null || true)"
+  fi
   PARSER="$HOME/.openspec/lib/parse_config.py"
   result=$($OS_PYTHON "$PARSER" "$OS_CONFIG" 2>/dev/null)
   OS_ACTIVE_STACK=$($OS_PYTHON "$HOME/.openspec/lib/parse_stack.py" "$OS_CONFIG" 2>/dev/null)
@@ -45,15 +54,22 @@ os_load_config() {
 os_load_env() {
   env_file="${OS_REPO_ROOT:-$(pwd)}/.env"
   if [ ! -f "$env_file" ]; then os_warn ".env not found"; return; fi
-  JIRA_BASE_URL=$(grep "^JIRA_BASE_URL=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_EMAIL=$(grep    "^JIRA_EMAIL="    "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_TOKEN=$(grep    "^JIRA_TOKEN="    "$env_file" | cut -d= -f2- | tr -d '\r')
-  JIRA_PROJECT_KEY=$(grep "^JIRA_PROJECT_KEY=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_BASE_URL=$(grep "^VAULT_BASE_URL=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_TOKEN=$(grep "^VAULT_TOKEN=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  VAULT_DEFAULT_DENOMINATION=$(grep "^VAULT_DEFAULT_DENOMINATION=" "$env_file" | cut -d= -f2- | tr -d '\r')
-  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY
+  # Under `set -o pipefail`, a missing key makes `grep` exit 1 and aborts the
+  # caller (e.g. os-transition). Read optional keys safely.
+  _os_env_get() {
+    grep "^$1=" "$env_file" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true
+  }
+  JIRA_BASE_URL=$(_os_env_get JIRA_BASE_URL)
+  JIRA_EMAIL=$(_os_env_get JIRA_EMAIL)
+  JIRA_TOKEN=$(_os_env_get JIRA_TOKEN)
+  JIRA_PROJECT_KEY=$(_os_env_get JIRA_PROJECT_KEY)
+  JIRA_STORY_POINTS_FIELD=$(_os_env_get JIRA_STORY_POINTS_FIELD)
+  VAULT_BASE_URL=$(_os_env_get VAULT_BASE_URL)
+  VAULT_TOKEN=$(_os_env_get VAULT_TOKEN)
+  VAULT_DEFAULT_DENOMINATION=$(_os_env_get VAULT_DEFAULT_DENOMINATION)
+  export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY JIRA_STORY_POINTS_FIELD
   export VAULT_BASE_URL VAULT_TOKEN VAULT_DEFAULT_DENOMINATION
+  unset -f _os_env_get
   os_success "Loaded .env"
 }
 

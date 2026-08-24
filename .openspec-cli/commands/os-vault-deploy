@@ -60,7 +60,7 @@ trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
 
 HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
     -X POST \
-    -H "Authorization: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: Bearer ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d @"${PAYLOAD_FILE}" \
     "${VAULT_BASE_URL}/v1/product-versions")

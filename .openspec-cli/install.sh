@@ -30,12 +30,30 @@ divider
 
 # ── Check dependencies ────────────────────────────────────────
 MISSING=0
-for dep in python3 curl git; do
+for dep in curl git; do
   if ! command -v "$dep" > /dev/null 2>&1; then
     error "Missing required dependency: $dep"
     MISSING=1
   fi
 done
+
+PYTHON_CMD=""
+for cmd in python py python3; do
+  if command -v "$cmd" > /dev/null 2>&1; then
+    ver=$("$cmd" -c 'import sys; print(sys.version_info.major)' 2>/dev/null || echo "")
+    if [ "$ver" = "3" ]; then
+      PYTHON_CMD="$cmd"
+      break
+    fi
+  fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+  error "Python 3 not found (tried: py, python3, python)"
+  MISSING=1
+else
+  success "Found Python 3: $PYTHON_CMD"
+fi
 
 if ! command -v gh > /dev/null 2>&1; then
   warn "GitHub CLI (gh) not found — os-commit PR creation will be skipped."
@@ -47,11 +65,18 @@ if [ "$MISSING" = "1" ]; then
   exit 1
 fi
 
+if "$PYTHON_CMD" -c 'from contracts_api import SmartContractDescriptor' > /dev/null 2>&1; then
+  success "Found: contracts_api SDK (Vault testing enabled)"
+else
+  warn "contracts_api not installed -- os-vault-test will not work"
+  warn "To install: cd contracts_sdk/contracts_sdk && $PYTHON_CMD -m pip install ."
+fi
+
 # ── Create install directory ──────────────────────────────────
 mkdir -p "$BIN_DIR" "$INSTALL_DIR/lib"
 
 # ── Copy lib files (commands resolve CLI_DIR as ~/.openspec) ──
-for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py; do
+for lib_file in "$REPO_CLI_DIR/lib/"*.sh "$REPO_CLI_DIR/lib/"*.py "$REPO_CLI_DIR/lib/"*.md; do
   [ -f "$lib_file" ] || continue
   lib_name=$(basename "$lib_file")
   sed 's/\r//' "$lib_file" > "$INSTALL_DIR/lib/$lib_name"
@@ -61,6 +86,7 @@ done
 
 # ── Symlink commands ──────────────────────────────────────────
 for cmd_file in "$REPO_CLI_DIR/commands"/os-*; do
+  [ -f "$cmd_file" ] || continue
   cmd_name=$(basename "$cmd_file")
   target="$BIN_DIR/$cmd_name"
 

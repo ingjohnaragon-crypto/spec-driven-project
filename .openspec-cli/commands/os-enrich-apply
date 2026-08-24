@@ -57,8 +57,22 @@ case "$confirm" in
 esac
 
 os_step "Uploading to Jira $TICKET_ID..."
+os_info "ADF converter strips <!-- jira-skip --> blocks and uploads story points from <!-- STORY_POINTS:N -->"
+os_info "Override field with JIRA_STORY_POINTS_FIELD (default: customfield_10016)"
 
-py "$HOME/.openspec/lib/jira_upload.py"   "$TICKET_ID" "$SOURCE_FILE"   "$JIRA_BASE_URL" "$JIRA_EMAIL" "$JIRA_TOKEN"
+UPLOADER=""
+if [ -f "$CLI_DIR/lib/jira_upload.py" ]; then
+  UPLOADER="$CLI_DIR/lib/jira_upload.py"
+elif [ -f "$HOME/.openspec/lib/jira_upload.py" ]; then
+  UPLOADER="$HOME/.openspec/lib/jira_upload.py"
+else
+  os_error "jira_upload.py not found. Re-run: sh .openspec-cli/install.sh"
+  exit 1
+fi
+
+py -X utf8 "$UPLOADER" \
+  "$TICKET_ID" "$SOURCE_FILE" \
+  "$JIRA_BASE_URL" "$JIRA_EMAIL" "$JIRA_TOKEN"
 
 EXIT_CODE=$?
 if [ "$EXIT_CODE" = "0" ]; then

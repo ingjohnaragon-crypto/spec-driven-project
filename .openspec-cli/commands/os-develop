@@ -88,6 +88,13 @@ You are acting as the backend-developer agent for an openspec project.
 You are on branch: $BRANCH
 IMPLEMENT the following Jira ticket following the plan below.
 
+## Autonomous execution (mandatory)
+- Do NOT ask the human any product/design questions. Do not pause for decisions.
+- Follow plan section "Decisiones bloqueadas" / locked decisions exactly.
+- If anything is still ambiguous, mirror contracts/fixed_term_deposit.py and continue.
+- Deliver a complete contract + tests (no skeletons, no TODO stubs, no try/except around contracts_api).
+- Use correct API 4.0 hook names only (*_hook, never *_code).
+
 ## Active Language
 $OS_LANGUAGE_LABEL
 $OS_LANGUAGE_DIRECTIVE
@@ -97,6 +104,7 @@ Stack: $OS_ACTIVE_STACK ($OS_STACK_LABEL)
 Build   : $OS_BUILD_CMD
 Test    : $OS_TEST_CMD
 Coverage: $OS_COVERAGE_CMD
+Golden reference: contracts/fixed_term_deposit.py + tests/test_fixed_term_deposit.py
 
 ## Jira Ticket: $JIRA_TICKET_ID
 Summary : $JIRA_SUMMARY
