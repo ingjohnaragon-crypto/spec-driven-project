@@ -11,6 +11,8 @@ OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
+os_load_config
+os_load_env
 
 CONTRACT_FILE="${1:-}"
 PRODUCT_ID="${2:-}"
@@ -60,7 +62,7 @@ trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
 
 HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
     -X POST \
-    -H "X-Auth-Token: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d @"${PAYLOAD_FILE}" \
     "${VAULT_BASE_URL}/v1/product-versions")
