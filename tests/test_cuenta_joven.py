@@ -133,6 +133,16 @@ class TestActivacion:
             contrato.MONTHLY_INTEREST,
         }
 
+    def test_schedule_diario_empieza_en_fecha_de_activacion(self):
+        resultado = contrato.activation_hook(
+            crear_vault(), ActivationHookArguments(effective_datetime=ACTIVACION)
+        )
+        schedule = resultado.scheduled_events_return_value[contrato.DAILY_WITHDRAWAL_RESET]
+        assert schedule.start_datetime == ACTIVACION
+        assert schedule.expression.hour == "0"
+        assert schedule.expression.minute == "0"
+        assert schedule.expression.second == "0"
+
     @pytest.mark.parametrize(
         "nombre,valor",
         [
@@ -287,6 +297,21 @@ class TestRegistroYReinicio:
         assert contrato._get_committed_balance(balances, contrato.DAILY_WITHDRAWALS, "GBP") == Decimal("100")
         assert contrato._get_committed_balance(balances, contrato.DAILY_WITHDRAWALS, "USD") == Decimal("0")
 
+    def test_cuentas_distintas_conservan_su_identificador(self):
+        primer_vault = crear_vault()
+        segundo_vault = crear_vault()
+        segundo_vault.account_id = "cuenta-joven-002"
+        primer_resultado = contrato.post_posting_hook(
+            primer_vault, argumentos_post([crear_posting(Decimal("10"))])
+        )
+        segundo_resultado = contrato.post_posting_hook(
+            segundo_vault, argumentos_post([crear_posting(Decimal("10"))])
+        )
+        primer_posting = primer_resultado.posting_instructions_directives[0].posting_instructions[0].postings[0]
+        segundo_posting = segundo_resultado.posting_instructions_directives[0].posting_instructions[0].postings[0]
+        assert primer_posting.account_id == "cuenta-joven-001"
+        assert segundo_posting.account_id == "cuenta-joven-002"
+
     def test_reset_usa_balance_de_la_fecha_efectiva(self):
         fecha_reset = datetime(2024, 1, 16, 0, 0, tzinfo=UTC)
         resultado = contrato.scheduled_event_hook(
@@ -367,4 +392,11 @@ class TestIntereses:
         instruccion = resultado.posting_instructions_directives[0].posting_instructions[0]
         assert len(instruccion.postings) == 2
         assert instruccion.instruction_details["hook_execution_id"] == "ejecucion-001"
+        debito = next(item for item in instruccion.postings if not item.credit)
+        credito = next(item for item in instruccion.postings if item.credit)
+        assert debito.account_address == contrato.INTEREST_EXPENSE
+        assert credito.account_address == contrato.DEFAULT_ADDRESS
+        assert debito.amount == Decimal("4.17")
+        assert credito.amount == Decimal("4.17")
+        assert instruccion.instruction_details["event_type"] == contrato.MONTHLY_INTEREST
         assert all(posting.denomination == "GBP" for posting in instruccion.postings)
