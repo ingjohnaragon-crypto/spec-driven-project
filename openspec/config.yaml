@@ -18,7 +18,7 @@ agent: copilot
 # code, comments, docs, Jira content, commits, PR titles/bodies.
 # Change with: os-language <code>
 # ─────────────────────────────────────────────
-language: es
+language: en
 
 # ─────────────────────────────────────────────
 # STACK REGISTRY
