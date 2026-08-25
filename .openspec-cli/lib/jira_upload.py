@@ -103,34 +103,36 @@ def jira_request(method: str, path: str, payload: dict) -> tuple[bool, str]:
 
 def update_issue(issue_key: str, content: str) -> bool:
     prepared, points = prepare_content(content)
-    fields: dict = {"description": markdown_to_adf(prepared)}
-
-    if points is not None and STORY_POINTS_FIELD:
-        fields[STORY_POINTS_FIELD] = points
-
-    ok, msg = jira_request("PUT", f"/rest/api/3/issue/{issue_key}", {"fields": fields})
-    if ok:
-        extra = f" (story points={points})" if points is not None else ""
-        print(f"Updated ticket {issue_key} - {msg}{extra}")
-        return True
-
-    # Retry without story points if the custom field is wrong/unavailable
-    if points is not None and STORY_POINTS_FIELD in fields:
-        print(
-            f"Warning: story points field '{STORY_POINTS_FIELD}' failed for {issue_key}; "
-            f"retrying description only. Detail: {msg}",
-            file=sys.stderr,
-        )
-        ok2, msg2 = jira_request(
-            "PUT",
-            f"/rest/api/3/issue/{issue_key}",
-            {"fields": {"description": markdown_to_adf(prepared)}},
-        )
-        if ok2:
-            print(f"Updated ticket {issue_key} - {msg2} (description only)")
-            return True
-        print(f"Error: {msg2} updating {issue_key}", file=sys.stderr)
+    # Jira acepta (HTTP 204) un PUT combinado de description (ADF rico) +
+    # custom field de story points, pero descarta el custom field en
+    # silencio sin avisar. Separados en dos requests independientes, ambos
+    # aplican correctamente -- confirmado empiricamente.
+    ok, msg = jira_request(
+        "PUT",
+        f"/rest/api/3/issue/{issue_key}",
+        {"fields": {"description": markdown_to_adf(prepared)}},
+    )
+    if not ok:
+        print(f"Error: {msg} updating {issue_key}", file=sys.stderr)
         return False
+    if points is None or not STORY_POINTS_FIELD:
+        print(f"Updated ticket {issue_key} - {msg}")
+        return True
+    ok2, msg2 = jira_request(
+        "PUT",
+        f"/rest/api/3/issue/{issue_key}",
+        {"fields": {STORY_POINTS_FIELD: points}},
+    )
+    if ok2:
+        print(f"Updated ticket {issue_key} - {msg} (story points={points})")
+        return True
+    print(
+        f"Warning: story points field '{STORY_POINTS_FIELD}' failed for {issue_key}; "
+        f"description was updated OK. Detail: {msg2}",
+        file=sys.stderr,
+    )
+    print(f"Updated ticket {issue_key} - {msg} (description only, story points failed)")
+    return True
 
     print(f"Error: {msg} updating {issue_key}", file=sys.stderr)
     return False

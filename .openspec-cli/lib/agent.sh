@@ -252,9 +252,12 @@ os_deliver_prompt_capture() {
 
     if [ ! -s "$OUTPUT_FILE" ]; then
       os_warn "File is empty. Falling back to terminal paste."
-      os_step "Paste the response (CTRL+Z + Enter on Windows, CTRL+D on Unix):"
+      os_step "Paste the response below. When done, type FIN on its own line and press Enter:"
       OUTPUT=""
       while IFS= read -r line; do
+        if [ "$line" = "FIN" ]; then
+          break
+        fi
         OUTPUT="${OUTPUT}${line}
 "
       done
