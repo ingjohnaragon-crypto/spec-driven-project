@@ -236,12 +236,14 @@ body = {
 print(json.dumps(body, ensure_ascii=False))
 " "$_summary" "$_desc" "$_project" "$_type" "$_md_to_adf")
 
+  _payload_file=$(mktemp /tmp/os-jira-payload-XXXXXX.json)
+  printf '%s' "$_payload" > "$_payload_file"
   _response=$(curl -s \
     -X POST \
     -u "$JIRA_EMAIL:$JIRA_TOKEN" \
     -H "Accept: application/json" \
     -H "Content-Type: application/json" \
-    -d "$_payload" \
+    -d @"$_payload_file" \
     "$JIRA_BASE_URL/rest/api/3/issue")
 
   if echo "$_response" | grep -q '"id"'; then
@@ -256,8 +258,10 @@ print(json.dumps(body, ensure_ascii=False))
       "import sys,json; d=json.load(sys.stdin); print(d.get('errorMessages',['Unknown'])[0])" \
       2>/dev/null || echo "$_response")
     os_error "Could not create ticket: $_err"
+    rm -f "$_payload_file"
     return 1
   fi
+  rm -f "$_payload_file"
 }
 
 # ── List tickets in a project ────────────────────────────────

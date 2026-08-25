@@ -55,7 +55,7 @@ os_divider
 # ── Collect input ─────────────────────────────────────────────
 if [ -n "$QUICK_SUMMARY" ]; then
   SUMMARY="$QUICK_SUMMARY"
-  TYPE="${QUICK_TYPE:-Task}"
+  TYPE="${QUICK_TYPE:-Story}"
 else
   printf "Summary    : "; read -r SUMMARY
   printf "Type [Story/Bug/Task] (default: Story): "; read -r TYPE
