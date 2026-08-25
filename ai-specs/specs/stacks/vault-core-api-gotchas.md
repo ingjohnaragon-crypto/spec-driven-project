@@ -52,6 +52,39 @@ Este documento recoge los hallazgos técnicos descubiertos durante la sesión KA
 - Ejemplo de URL funcional:
 `GET /v1/balances/live?account_ids=<account_id>&page_size=50`
 
+## 1.7 Colisión de `product_id` con productos preexistentes del sandbox
+
+- El sandbox de labs es compartido: pueden existir productos de otros estudiantes o de ejemplos antiguos con el mismo `product_id`, como `current_account`, creado en 2023.
+- Subir solo la `version` del contrato no basta. Vault trata `product_id` como una familia de producto reservada y rechaza el deploy con: `"Cannot add contract template, contract with name:X already exists. Specify another product name or choose another migration strategy"`.
+- La solución es usar un `product_id` con prefijo propio, por ejemplo `openspec_current_account`, en vez de reutilizar el nombre genérico del contrato.
+
+## 1.8 Deploy exitoso de los cinco contratos
+
+| Contrato | `product_version_id` | `product_id` usado |
+|---|---:|---|
+| `cuenta_joven` | `9652` | `cuenta_joven` |
+| `savings_product` | `9654` | `savings_product` |
+| `current_account` | `9658` | `openspec_current_account` |
+| `fixed_term_deposit` | `9659` | `openspec_fixed_term_deposit` |
+| `personal_loan` | `9660` | `openspec_personal_loan` |
+
+Estos identificadores corresponden a los despliegues exitosos observados en el sandbox durante la sesión.
+
+## 1.9 Extractor de payload de deploy: soporte para valores anidados
+
+`vault_deploy_payload.py` extrae automáticamente `params[]` (nombre y valor) de los `Parameter(level=ParameterLevel.TEMPLATE, ...)` del contrato mediante AST.
+
+Soporta:
+
+- `Decimal("X")` -> `"X"`.
+- Constantes simples como `"GBP"` o `1`.
+- `OptionalValue(UnionItemValue("false"))` -> `"false"`: extrae el valor interno de `UnionItemValue` e ignora el wrapper `OptionalValue`.
+
+## Correcciones adicionales a contratos
+
+- `update_permission` es obligatorio en todos los `Parameter(level=ParameterLevel.INSTANCE, ...)` de los cinco contratos. Ninguno lo tenía antes de esta sesión; se agregó `update_permission=ParameterUpdatePermission.USER_EDITABLE` mediante el script de AST `patch_add_update_permission.py`.
+- Excepción importante: los parámetros `derived=True`, como `accrued_interest` y `days_to_maturity` en `fixed_term_deposit.py`, no deben llevar `update_permission`. La documentación oficial indica que no está soportado para parámetros DERIVED/TEMPLATE; cualquier valor agregado por error a un derivado debe revertirse manualmente.
+
 ## 2. Autenticación del sandbox de labs
 
 - El header correcto es **`X-Auth-Token: <token>`** (token de acceso plano), **NO** `Authorization: Bearer <token>`. El sandbox de labs no usa JWT.
@@ -76,7 +109,7 @@ Este documento recoge los hallazgos técnicos descubiertos durante la sesión KA
 | `os-create-ticket --hu` | Tipo por defecto "Task" en vez de "Story" | `TYPE="${QUICK_TYPE:-Story}"` |
 | `agent.sh` (captura de pegado) | `CTRL+Z`/`CTRL+D` no funcionan como EOF en Git Bash | Marcador de texto `FIN` en su propia línea |
 | `config.sh` | Acentos en español rotos en JSON generado por `py -c` en Windows | `export PYTHONIOENCODING=utf-8` |
-| `jira.sh` (crear ticket) | `curl -d "$ _payload"` con JSON grande como argumento de línea de comandos | Cambiado a `curl -d @archivo` |
+| `jira.sh` (crear ticket) | `curl -d "$_payload"` con JSON grande como argumento de línea de comandos | Cambiado a `curl -d @archivo` |
 | `jira_upload.py` | Jira descarta el custom field de story points en silencio si va en el mismo PUT que `description` (ADF rico) | Separado en dos `PUT` independientes |
 | `os-review-fix` | `if $OS_TEST_CMD` no interpreta `&&` en comandos compuestos | `bash -c "$OS_TEST_CMD"` |
 | `os-review-fix` | No revisaba `.review-output.md.applied` como fallback | Agregado fallback |
