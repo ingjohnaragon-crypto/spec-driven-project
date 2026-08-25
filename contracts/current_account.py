@@ -1,4 +1,5 @@
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceCoordinate,
@@ -21,7 +22,7 @@ from contracts_api import (
 from decimal import Decimal
 
 api = "4.0.0"
-version = "1.1.0"
+version = "1.1.1"
 display_name = "Current Account with Overdraft"
 summary = "Current account product with authorized overdraft limit"
 description = (
@@ -39,6 +40,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account currency denomination. One currency per account.",
         default_value="GBP",
@@ -50,6 +52,7 @@ parameters = [
             step=Decimal("0.01"),
         ),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Overdraft Limit",
         description="Maximum permitted overdraft for the account.",
         default_value=Decimal("0.00"),

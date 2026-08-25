@@ -3,6 +3,7 @@
 # Contracts Language API 4.0
 
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceDefaultDict,
@@ -65,6 +66,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account denomination. One currency per account.",
         default_value="GBP",

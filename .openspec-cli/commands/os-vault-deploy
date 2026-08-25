@@ -73,22 +73,6 @@ if [ "${HTTP_STATUS}" != "200" ]; then
     exit 1
 fi
 
-"${OS_PYTHON}" << PYEOF
-import json
-
-with open("${RESULT_FILE}") as f:
-    result = json.load(f)
-
-pv = result.get("product_version", result)
-print(f"\n✅ Product version deployed successfully!")
-print(f"   product_version_id : {pv.get('id','?')}")
-print(f"   product_id         : {pv.get('product_id','?')}")
-print(f"   display_name       : {pv.get('display_name','?')}")
-print(f"   is_current         : {pv.get('is_current','?')}")
-print(f"   api_version        : {pv.get('contracts_language_api_version','?')}")
-print(f"\n   Next steps:")
-print(f"   1. Create an account: os-vault-account <product_version_id>")
-print(f"   2. Test with postings via Vault dashboard or API")
-PYEOF
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_deploy_print_result.py" "${RESULT_FILE}"
 
 os_print_separator

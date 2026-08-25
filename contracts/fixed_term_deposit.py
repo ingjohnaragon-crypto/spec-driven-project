@@ -3,6 +3,7 @@
 # Contracts Language API 4.0
 
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceCoordinate,
@@ -64,6 +65,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account denomination. One currency per account.",
         default_value="GBP",
@@ -84,6 +86,7 @@ parameters = [
         name="maturity_date",
         shape=OptionalShape(shape=DateShape()),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Maturity Date",
         description="The date on which the deposit matures. Must be in the future at activation.",
     ),

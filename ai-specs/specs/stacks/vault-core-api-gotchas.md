@@ -79,6 +79,7 @@ Soporta:
 - `Decimal("X")` -> `"X"`.
 - Constantes simples como `"GBP"` o `1`.
 - `OptionalValue(UnionItemValue("false"))` -> `"false"`: extrae el valor interno de `UnionItemValue` e ignora el wrapper `OptionalValue`.
+- **`api_version` en la respuesta del deploy**: el campo enviado en el request (`contracts_language_api_version`) no aparece en la respuesta de `POST /v1/product-versions` ni en `GET .../batchGet` con consulta simple, igual que `code`, que también vuelve vacío (`""`). El campo real para mostrar la versión es **`display_version_number`**, un objeto `{major, minor, patch}` que sí se devuelve siempre.
 
 ## Correcciones adicionales a contratos
 
