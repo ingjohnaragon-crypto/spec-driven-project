@@ -1,0 +1,97 @@
+#!/usr/bin/bash
+# os-vault-posting — Create a simple deposit (inbound_hard_settlement) posting
+# Usage: os-vault-posting <account_id> <amount> <denomination> [internal_account_id]
+# Example:
+#   os-vault-posting 567e10c7-97db-4dfa-a356-60e498ec526d 100000 COP
+#   os-vault-posting 567e10c7-97db-4dfa-a356-60e498ec526d 50000 COP 1
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+os_load_config
+os_load_env
+
+ACCOUNT_ID="${1:-}"
+AMOUNT="${2:-}"
+DENOMINATION="${3:-}"
+INTERNAL_ACCOUNT_ID="${4:-1}"
+
+if [ -z "${ACCOUNT_ID}" ] || [ -z "${AMOUNT}" ] || [ -z "${DENOMINATION}" ]; then
+    os_print_error "Usage: os-vault-posting <account_id> <amount> <denomination> [internal_account_id]"
+    os_print_info  "Example: os-vault-posting <account_id> 100000 COP"
+    exit 1
+fi
+
+if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
+    exit 1
+fi
+
+os_print_separator
+os_print_header "OpenSpec — Vault Posting (Deposit)"
+os_print_separator
+os_print_info "Account         : ${ACCOUNT_ID}"
+os_print_info "Amount          : ${AMOUNT} ${DENOMINATION}"
+os_print_info "Internal account: ${INTERNAL_ACCOUNT_ID}"
+os_print_separator
+
+PAYLOAD_FILE=$(mktemp /tmp/os-vault-posting-XXXXXX.json)
+RESULT_FILE=$(mktemp /tmp/os-vault-posting-result-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+
+"${OS_PYTHON}" -c "
+import json, sys, uuid
+
+account_id = sys.argv[1]
+amount = sys.argv[2]
+denomination = sys.argv[3]
+internal_account_id = sys.argv[4]
+
+payload = {
+    'request_id': str(uuid.uuid4()),
+    'posting_instruction_batch': {
+        'client_id': 'OpenSpecCLI',
+        'client_batch_id': str(uuid.uuid4()),
+        'posting_instructions': [
+            {
+                'client_transaction_id': str(uuid.uuid4()),
+                'instruction_details': {
+                    'description': 'OpenSpec test deposit'
+                },
+                'inbound_hard_settlement': {
+                    'amount': amount,
+                    'denomination': denomination,
+                    'target_account_id': account_id,
+                    'internal_account_id': internal_account_id,
+                }
+            }
+        ]
+    }
+}
+print(json.dumps(payload, indent=2))
+" "${ACCOUNT_ID}" "${AMOUNT}" "${DENOMINATION}" "${INTERNAL_ACCOUNT_ID}" > "${PAYLOAD_FILE}"
+
+cp "${PAYLOAD_FILE}" /tmp/last-posting-payload.json
+
+os_step "Calling POST /v1/posting-instruction-batches ..."
+
+HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+    -X POST \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d @"${PAYLOAD_FILE}" \
+    "${VAULT_BASE_URL}/v1/posting-instruction-batches")
+
+if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "201" ]; then
+    os_print_error "Posting failed (HTTP ${HTTP_STATUS}):"
+    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
+    exit 1
+fi
+
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_posting_print_result.py" "${RESULT_FILE}"
+
+os_print_separator
