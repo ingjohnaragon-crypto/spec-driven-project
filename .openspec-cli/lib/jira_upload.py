@@ -134,9 +134,6 @@ def update_issue(issue_key: str, content: str) -> bool:
     print(f"Updated ticket {issue_key} - {msg} (description only, story points failed)")
     return True
 
-    print(f"Error: {msg} updating {issue_key}", file=sys.stderr)
-    return False
-
 
 ok = update_issue(ticket_id, main_content)
 for subtask_key, subtask_content in subtask_updates:

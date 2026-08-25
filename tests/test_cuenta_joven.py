@@ -210,11 +210,11 @@ class TestRetiros:
         )
         assert resultado.rejection.reason_code == RejectionReason.INSUFFICIENT_FUNDS
 
-    def test_rechaza_retiro_cero(self):
+    def test_operacion_sin_efecto_committed_no_consume_limite(self):
         resultado = contrato.pre_posting_hook(
             crear_vault(), argumentos_pre([crear_posting(Decimal("0.00"))])
         )
-        assert resultado.rejection.reason_code == RejectionReason.AGAINST_TNC
+        assert resultado.rejection is None
 
     def test_rechaza_denominacion_incorrecta(self):
         resultado = contrato.pre_posting_hook(
@@ -244,6 +244,12 @@ class TestRegistroYReinicio:
             contrato.DAILY_WITHDRAWALS_OFFSET,
         }
         assert all(posting.amount == Decimal("125") for posting in postings)
+        debito = next(posting for posting in postings if not posting.credit)
+        credito = next(posting for posting in postings if posting.credit)
+        assert debito.account_address == contrato.DAILY_WITHDRAWALS_OFFSET
+        assert credito.account_address == contrato.DAILY_WITHDRAWALS
+        assert debito.denomination == DENOMINACION
+        assert credito.denomination == DENOMINACION
 
     def test_abono_no_crea_registro(self):
         resultado = contrato.post_posting_hook(
@@ -262,6 +268,12 @@ class TestRegistroYReinicio:
             contrato.DAILY_WITHDRAWALS_OFFSET,
         }
         assert all(posting.amount == Decimal("125") for posting in postings)
+        debito = next(posting for posting in postings if not posting.credit)
+        credito = next(posting for posting in postings if posting.credit)
+        assert debito.account_address == contrato.DAILY_WITHDRAWALS
+        assert credito.account_address == contrato.DAILY_WITHDRAWALS_OFFSET
+        assert debito.denomination == DENOMINACION
+        assert credito.denomination == DENOMINACION
 
     def test_reset_sin_acumulado_es_no_op(self):
         resultado = contrato.scheduled_event_hook(
@@ -274,6 +286,17 @@ class TestRegistroYReinicio:
         balances = crear_balances(acumulado=Decimal("100"), denominacion="GBP")
         assert contrato._get_committed_balance(balances, contrato.DAILY_WITHDRAWALS, "GBP") == Decimal("100")
         assert contrato._get_committed_balance(balances, contrato.DAILY_WITHDRAWALS, "USD") == Decimal("0")
+
+    def test_reset_usa_balance_de_la_fecha_efectiva(self):
+        fecha_reset = datetime(2024, 1, 16, 0, 0, tzinfo=UTC)
+        resultado = contrato.scheduled_event_hook(
+            crear_vault(acumulado=Decimal("125")),
+            ScheduledEventHookArguments(
+                effective_datetime=fecha_reset,
+                event_type=contrato.DAILY_WITHDRAWAL_RESET,
+            ),
+        )
+        assert resultado.posting_instructions_directives[0].posting_instructions[0].postings
 
 
 class TestIntereses:
@@ -318,6 +341,20 @@ class TestIntereses:
             crear_vault(saldo=Decimal("0")), argumentos_evento(contrato.MONTHLY_INTEREST)
         )
         assert resultado.posting_instructions_directives == []
+
+    def test_interes_aplica_redondeo_half_up(self):
+        resultado = contrato.scheduled_event_hook(
+            crear_vault(
+                saldo=Decimal("1250.00"),
+                tasa_estandar=Decimal("0.0504"),
+                tasa_bonificada=Decimal("0.0504"),
+                minimo_saldo=Decimal("0"),
+                minimo_ahorro=Decimal("0"),
+            ),
+            argumentos_evento(contrato.MONTHLY_INTEREST),
+        )
+        postings = resultado.posting_instructions_directives[0].posting_instructions[0].postings
+        assert {posting.amount for posting in postings} == {Decimal("5.25")}
 
     def test_evento_desconocido_es_no_op(self):
         resultado = contrato.scheduled_event_hook(crear_vault(), argumentos_evento("OTRO"))

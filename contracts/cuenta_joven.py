@@ -144,19 +144,6 @@ def _get_withdrawal_amount(posting_instructions, denomination: str) -> Decimal:
     return abs(effect) if effect < Decimal("0") else Decimal("0")
 
 
-def _has_default_zero_posting(posting_instructions, denomination: str) -> bool:
-    for posting in posting_instructions:
-        for coordinate, balance in posting.balances().items():
-            if (
-                coordinate.phase == Phase.COMMITTED
-                and coordinate.account_address == DEFAULT_ADDRESS
-                and coordinate.denomination == denomination
-                and balance.net == Decimal("0")
-            ):
-                return True
-    return False
-
-
 def _calculate_bonus_eligibility(
     balance: Decimal,
     minimum_balance: Decimal,
@@ -298,13 +285,6 @@ def pre_posting_hook(
     )
     withdrawal = _get_withdrawal_amount(hook_arguments.posting_instructions, denomination)
 
-    if _has_default_zero_posting(hook_arguments.posting_instructions, denomination):
-        return PrePostingHookResult(
-            rejection=Rejection(
-                message="Withdrawal amount must be greater than zero.",
-                reason_code=RejectionReason.AGAINST_TNC,
-            )
-        )
     if withdrawal > Decimal("0") and current_balance + posting_effect < Decimal("0"):
         return PrePostingHookResult(
             rejection=Rejection(
