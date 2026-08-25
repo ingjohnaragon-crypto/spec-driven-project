@@ -3,6 +3,7 @@
 # Contracts Language API 4.0
 
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceCoordinate,
@@ -56,6 +57,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account denomination. One currency per account.",
         default_value="GBP",
@@ -67,6 +69,7 @@ parameters = [
             step=Decimal("0.01"),
         ),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Principal",
         description="Loan principal disbursed at activation.",
         default_value=Decimal("1000.00"),
@@ -90,6 +93,7 @@ parameters = [
             step=Decimal("1"),
         ),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Term (months)",
         description="Number of monthly annuity instalments.",
         default_value=Decimal("12"),

@@ -53,6 +53,15 @@ def _literal_value(node):
             inner = node.args[0]
             if isinstance(inner, ast.Constant):
                 return str(inner.value)
+            return None
+        if func_name == "OptionalValue" and node.args:
+            # OptionalValue(UnionItemValue("false")) -> extraer el key interno
+            return _literal_value(node.args[0])
+        if func_name == "UnionItemValue" and node.args:
+            inner = node.args[0]
+            if isinstance(inner, ast.Constant):
+                return str(inner.value)
+            return None
         return None
     if isinstance(node, ast.Constant):
         return str(node.value)
