@@ -1,11 +1,13 @@
 #!/usr/bin/bash
 # os-vault-products — List Smart Contract products deployed in Vault
-# Usage: os-vault-products [--all] [--mine]
+# Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]
 #        os-vault-products --backfill [--include-internal]
 #   --all       also list superseded (non-current) versions, not just each product's current one
 #   --mine      only show products this machine has deployed via os-vault-deploy.
 #               Vault's API has no "created by" field, so this is tracked locally in
 #               .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
+#   --id        look up one specific product by id instead of listing every product
+#               (repeat --id to look up several at once, e.g. --id foo --id bar).
 #   --backfill  one-time: seed that local log with every product currently in Vault,
 #               for products deployed before --mine tracking existed. Internal
 #               products are skipped unless --include-internal is also passed.
@@ -24,19 +26,30 @@ ONLY_CURRENT="true"
 MINE_ONLY="false"
 BACKFILL="false"
 INCLUDE_INTERNAL="false"
-for arg in "$@"; do
-    case "$arg" in
+IDS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
         --all) ONLY_CURRENT="false" ;;
         --mine) MINE_ONLY="true" ;;
         --backfill) BACKFILL="true" ;;
         --include-internal) INCLUDE_INTERNAL="true" ;;
+        --id)
+            shift
+            if [ -z "${1:-}" ]; then
+                os_print_error "--id requires a product id argument"
+                exit 1
+            fi
+            IDS+=("$1")
+            ;;
         *)
-            os_print_error "Unknown option: ${arg}"
-            os_print_info "Usage: os-vault-products [--all] [--mine]"
+            os_print_error "Unknown option: $1"
+            os_print_info "Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]"
             os_print_info "       os-vault-products --backfill [--include-internal]"
             exit 1
             ;;
     esac
+    shift
 done
 
 if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
@@ -63,6 +76,9 @@ os_print_separator
 os_print_header "OpenSpec — Vault Products"
 os_print_separator
 os_print_info "Vault URL : ${VAULT_BASE_URL}"
+if [ ${#IDS[@]} -gt 0 ]; then
+    os_print_info "Product ID(s) : ${IDS[*]}"
+fi
 if [ "${ONLY_CURRENT}" = "true" ]; then
     os_print_info "Filter    : current versions only (use --all to include superseded ones)"
 else
@@ -73,6 +89,6 @@ if [ "${MINE_ONLY}" = "true" ]; then
 fi
 os_print_separator
 
-"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}" "${IDS[@]}"
 
 os_print_separator

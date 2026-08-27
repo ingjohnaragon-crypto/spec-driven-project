@@ -16,8 +16,12 @@ Vault has no "created by" concept, so "only what I deployed" (--mine) is
 tracked locally: os-vault-deploy appends a JSON line per successful deploy to
 a log file, and this script filters the live product list against it.
 
+Optionally, one or more product ids can be requested directly via
+GET /v1/products:batchGet instead of listing every product.
+
 Usage:
-  py vault_products_fetch_and_print.py <base_url> <token> <only_current:true|false> <mine_only:true|false> [log_file]
+  py vault_products_fetch_and_print.py <base_url> <token> <only_current:true|false> \
+      <mine_only:true|false> [log_file] [product_id ...]
 """
 from __future__ import annotations
 
@@ -123,18 +127,27 @@ def print_row(i: int, product_id: str, display_name: str, product_version_id: st
 def main() -> int:
     if len(sys.argv) < 5:
         print(
-            "Usage: py vault_products_fetch_and_print.py <base_url> <token> <only_current> <mine_only> [log_file]",
+            "Usage: py vault_products_fetch_and_print.py <base_url> <token> <only_current> "
+            "<mine_only> [log_file] [product_id ...]",
             file=sys.stderr,
         )
         return 1
 
     base_url, token, only_current_arg, mine_only_arg = sys.argv[1:5]
     log_file = sys.argv[5] if len(sys.argv) > 5 else ""
+    requested_ids = sys.argv[6:]
     only_current = only_current_arg.lower() == "true"
     mine_only = mine_only_arg.lower() == "true"
 
     try:
-        products = paginated_get(base_url, token, "/v1/products", "products", {})
+        if requested_ids:
+            found = batch_get(base_url, token, "/v1/products:batchGet", requested_ids, "products")
+            products = list(found.values())
+            for pid in requested_ids:
+                if pid not in found:
+                    warn(f"Product '{pid}' not found")
+        else:
+            products = paginated_get(base_url, token, "/v1/products", "products", {})
     except urllib.error.HTTPError as e:
         err(f"Fetching products failed (HTTP {e.code}):")
         print(e.read().decode(errors="replace"), file=sys.stderr)
