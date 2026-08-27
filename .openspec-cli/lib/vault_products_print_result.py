@@ -34,3 +34,6 @@ for i, pv in enumerate(versions, start=1):
     print()
 
 print("  Tip: os-vault-account <product_version_id> <customer_id>  -- open a test account")
+
+if data.get("next_page_token"):
+    print("\n  Note: more products exist beyond this page (pagination not yet supported by this command).")
