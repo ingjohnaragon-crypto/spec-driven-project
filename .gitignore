@@ -84,3 +84,4 @@ venv/
 .openspec-cli/.fix-prompt.md
 .openspec-cli/staged.tmp
 .openspec-cli/.vault-deployed-products.log
+.openspec-cli/.vault-deployed-products.log.bak

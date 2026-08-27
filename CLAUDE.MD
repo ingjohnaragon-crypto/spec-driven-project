@@ -100,11 +100,12 @@ os-vault-test --coverage               # con cobertura ≥ 90%
 os-vault-test tests/test_savings_product.py    # archivo específico
 os-vault-simulate contracts/<product>.py <start> <end> '<params>'
 os-vault-deploy contracts/<product>.py <product_id> "<display name>"
-os-vault-products                      # listar productos desplegados en Vault
-os-vault-products --all                # incluir versiones no vigentes
-os-vault-products --mine               # solo productos desplegados desde esta máquina (os-vault-deploy)
-os-vault-products --backfill           # registra en el log --mine los productos ya existentes en Vault
+os-vault-products                      # sin banderas = --mine (sandbox compartido entre equipos)
+os-vault-products --mine --all         # incluye versiones no vigentes, solo mis productos
+os-vault-products --all-unsafe         # TODO el sandbox compartido -- pide confirmación con el conteo
 os-vault-products --id savings_product # consulta un producto puntual por id (repetible: --id a --id b)
+os-vault-products --backfill           # registra en el log --mine los productos existentes (allowlist / prefijo openspec_)
+os-vault-products --prune              # limpia del log --mine cualquier producto que no sea mío (hace backup .bak)
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```

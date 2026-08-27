@@ -3,12 +3,19 @@
 
 os-vault-products --mine only knows about products deployed *after* the log
 existed (os-vault-deploy writes to it going forward). This backfills the log
-with everything currently in the Vault instance, for products that were
-deployed before that tracking was added. Existing log entries are left
-untouched; already-recorded product ids are skipped.
+with products that were deployed before that tracking was added.
+
+The Vault sandbox is shared across teams, so a raw "everything in
+GET /v1/products" dump is NOT safe to trust as "mine" -- it would pull in
+other teams' products too. A product is only backfilled if its id is in the
+allowlist file, or starts with the naming-convention prefix (default
+"openspec_"). Everything else is left out and counted separately as
+"skipped (not mine)". Existing log entries are left untouched;
+already-recorded product ids are skipped.
 
 Usage:
-  py vault_backfill_mine_log.py <base_url> <token> <log_file> <include_internal:true|false>
+  py vault_backfill_mine_log.py <base_url> <token> <log_file> <include_internal:true|false> \
+      <allowlist_file> [prefix]
 """
 from __future__ import annotations
 
@@ -19,6 +26,10 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from vault_mine_filter import DEFAULT_PREFIX, is_mine, load_allowlist  # noqa: E402
 
 RED = "\033[0;31m"
 GREEN = "\033[0;32m"
@@ -79,15 +90,18 @@ def load_existing_ids(log_file: str) -> set:
 
 
 def main() -> int:
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         print(
-            "Usage: py vault_backfill_mine_log.py <base_url> <token> <log_file> <include_internal>",
+            "Usage: py vault_backfill_mine_log.py <base_url> <token> <log_file> "
+            "<include_internal> <allowlist_file> [prefix]",
             file=sys.stderr,
         )
         return 1
 
-    base_url, token, log_file, include_internal_arg = sys.argv[1:5]
+    base_url, token, log_file, include_internal_arg, allowlist_file = sys.argv[1:6]
+    prefix = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else DEFAULT_PREFIX
     include_internal = include_internal_arg.lower() == "true"
+    allowlist = load_allowlist(allowlist_file)
 
     try:
         all_products = paginated_products(base_url, token)
@@ -100,10 +114,15 @@ def main() -> int:
         return 1
 
     internal_skipped = 0
+    not_mine_skipped = 0
     products = []
     for p in all_products:
         if p.get("is_internal") and not include_internal:
             internal_skipped += 1
+            continue
+        product_id = p.get("id", "")
+        if not is_mine(product_id, allowlist, prefix):
+            not_mine_skipped += 1
             continue
         products.append(p)
 
@@ -140,6 +159,8 @@ def main() -> int:
         print(f"  ({already_recorded} already recorded, skipped)")
     if internal_skipped:
         print(f"  ({internal_skipped} internal product(s) skipped -- pass --include-internal to include them)")
+    if not_mine_skipped:
+        print(f"  ({not_mine_skipped} product(s) skipped (not mine) -- not in the allowlist and no '{prefix}' prefix)")
 
     return 0
 

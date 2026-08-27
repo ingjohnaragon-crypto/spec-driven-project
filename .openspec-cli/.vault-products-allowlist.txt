@@ -1,0 +1,13 @@
+# os-vault-products --mine / --backfill / --prune allowlist
+#
+# One product_id per line. Lines starting with # are ignored.
+# Anything whose product_id starts with "openspec_" is already treated as
+# mine automatically (see vault_mine_filter.py) -- list everything else here
+# explicitly. The Vault sandbox is shared across Accelerathon teams, so this
+# file is what keeps --mine scoped to only what this repo's tooling created.
+
+cuenta_joven
+savings_product
+openspec_current_account
+openspec_fixed_term_deposit
+openspec_personal_loan
