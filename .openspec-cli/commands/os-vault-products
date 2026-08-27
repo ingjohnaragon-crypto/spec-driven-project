@@ -34,7 +34,7 @@ else
 fi
 os_print_separator
 
-URL="${VAULT_BASE_URL}/v1/product-versions?page_size=50"
+URL="${VAULT_BASE_URL}/v1/product-versions?page_size=30"
 if [ "${ONLY_CURRENT}" = "true" ]; then
     URL="${URL}&is_current=true"
 fi
