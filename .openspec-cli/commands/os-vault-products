@@ -2,6 +2,10 @@
 # os-vault-products — List Smart Contract products (product versions) deployed in Vault
 # Usage: os-vault-products [--all]
 #   (default: only current/active product versions; --all also lists superseded versions)
+#
+# Vault's GET /v1/product-versions requires a product_id (there is no "list
+# versions across all products" call), so the fetch is two-step: list all
+# Products, then the version(s) for each one. See vault_products_fetch_and_print.py.
 
 set -euo pipefail
 
@@ -34,35 +38,6 @@ else
 fi
 os_print_separator
 
-URL="${VAULT_BASE_URL}/v1/product-versions?page_size=30"
-if [ "${ONLY_CURRENT}" = "true" ]; then
-    URL="${URL}&is_current=true"
-fi
-
-RESULT_FILE=$(mktemp /tmp/os-vault-products-XXXXXX.json)
-CURL_ERR_FILE=$(mktemp /tmp/os-vault-products-err-XXXXXX)
-trap "rm -f ${RESULT_FILE} ${CURL_ERR_FILE}" EXIT
-
-set +e
-HTTP_STATUS=$(curl -sS -o "${RESULT_FILE}" -w "%{http_code}" \
-    -H "X-Auth-Token: ${VAULT_TOKEN}" \
-    -H "Content-Type: application/json" \
-    "${URL}" 2>"${CURL_ERR_FILE}")
-CURL_EXIT=$?
-set -e
-
-if [ "${CURL_EXIT}" != "0" ]; then
-    os_print_error "Could not reach Vault (curl exit code ${CURL_EXIT}):"
-    cat "${CURL_ERR_FILE}" >&2
-    exit 1
-fi
-
-if [ "${HTTP_STATUS}" != "200" ]; then
-    os_print_error "Fetching products failed (HTTP ${HTTP_STATUS}):"
-    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
-    exit 1
-fi
-
-"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_print_result.py" "${RESULT_FILE}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}"
 
 os_print_separator
