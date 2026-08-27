@@ -1,10 +1,14 @@
 #!/usr/bin/bash
 # os-vault-products — List Smart Contract products deployed in Vault
 # Usage: os-vault-products [--all] [--mine]
-#   --all   also list superseded (non-current) versions, not just each product's current one
-#   --mine  only show products this machine has deployed via os-vault-deploy.
-#           Vault's API has no "created by" field, so this is tracked locally in
-#           .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
+#        os-vault-products --backfill [--include-internal]
+#   --all       also list superseded (non-current) versions, not just each product's current one
+#   --mine      only show products this machine has deployed via os-vault-deploy.
+#               Vault's API has no "created by" field, so this is tracked locally in
+#               .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
+#   --backfill  one-time: seed that local log with every product currently in Vault,
+#               for products deployed before --mine tracking existed. Internal
+#               products are skipped unless --include-internal is also passed.
 
 set -euo pipefail
 
@@ -18,13 +22,18 @@ os_load_env
 
 ONLY_CURRENT="true"
 MINE_ONLY="false"
+BACKFILL="false"
+INCLUDE_INTERNAL="false"
 for arg in "$@"; do
     case "$arg" in
         --all) ONLY_CURRENT="false" ;;
         --mine) MINE_ONLY="true" ;;
+        --backfill) BACKFILL="true" ;;
+        --include-internal) INCLUDE_INTERNAL="true" ;;
         *)
             os_print_error "Unknown option: ${arg}"
             os_print_info "Usage: os-vault-products [--all] [--mine]"
+            os_print_info "       os-vault-products --backfill [--include-internal]"
             exit 1
             ;;
     esac
@@ -36,6 +45,19 @@ if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
 fi
 
 LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
+
+if [ "${BACKFILL}" = "true" ]; then
+    os_print_separator
+    os_print_header "OpenSpec — Vault Products (backfill --mine log)"
+    os_print_separator
+    os_print_info "Vault URL : ${VAULT_BASE_URL}"
+    os_print_info "Records every product currently in Vault into the local --mine"
+    os_print_info "log, for products deployed before that tracking existed."
+    os_print_separator
+    "${OS_PYTHON}" "${OS_CLI_LIB}/vault_backfill_mine_log.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${LOG_FILE}" "${INCLUDE_INTERNAL}"
+    os_print_separator
+    exit 0
+fi
 
 os_print_separator
 os_print_header "OpenSpec — Vault Products"

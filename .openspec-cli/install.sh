@@ -204,6 +204,7 @@ info "  os-vault-test     [file] [--coverage]      Lint + pytest (contracts_api 
 info "  os-vault-simulate <contract.py> [start] [end] [params_json]"
 info "  os-vault-deploy   <contract.py> <product_id> \"<display name>\""
 info "  os-vault-products [--all] [--mine]         List deployed products"
+info "  os-vault-products --backfill [--include-internal]  Seed --mine log"
 info "  os-vault-account  <product_version_id> <customer_id> [denomination]"
 info "  os-vault-balances <account_id>"
 divider

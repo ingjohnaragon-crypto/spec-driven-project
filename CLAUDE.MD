@@ -103,6 +103,7 @@ os-vault-deploy contracts/<product>.py <product_id> "<display name>"
 os-vault-products                      # listar productos desplegados en Vault
 os-vault-products --all                # incluir versiones no vigentes
 os-vault-products --mine               # solo productos desplegados desde esta máquina (os-vault-deploy)
+os-vault-products --backfill           # registra en el log --mine los productos ya existentes en Vault
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```
