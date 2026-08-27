@@ -53,13 +53,13 @@ open-spec/
 │   │   ├── parse_stack.py
 │   │   ├── vault_simulate_payload.py
 │   │   └── vault_deploy_payload.py
-│   └── commands/                     # 16 comandos os-*
+│   └── commands/                     # 17 comandos os-*
 └── .github/workflows/ci.yml          # CI con contracts_api SDK
 ```
 
 ---
 
-## 16 Comandos CLI
+## 17 Comandos CLI
 
 ### Configuración
 ```bash
@@ -100,6 +100,8 @@ os-vault-test --coverage               # con cobertura ≥ 90%
 os-vault-test tests/test_savings_product.py    # archivo específico
 os-vault-simulate contracts/<product>.py <start> <end> '<params>'
 os-vault-deploy contracts/<product>.py <product_id> "<display name>"
+os-vault-products                      # listar productos desplegados en Vault
+os-vault-products --all                # incluir versiones no vigentes
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```
