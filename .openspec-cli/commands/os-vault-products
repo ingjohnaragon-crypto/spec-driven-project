@@ -1,11 +1,16 @@
 #!/usr/bin/bash
-# os-vault-products — List Smart Contract products (product versions) deployed in Vault
-# Usage: os-vault-products [--all]
-#   (default: only current/active product versions; --all also lists superseded versions)
-#
-# Vault's GET /v1/product-versions requires a product_id (there is no "list
-# versions across all products" call), so the fetch is two-step: list all
-# Products, then the version(s) for each one. See vault_products_fetch_and_print.py.
+# os-vault-products — List Smart Contract products deployed in Vault
+# Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]
+#        os-vault-products --backfill [--include-internal]
+#   --all       also list superseded (non-current) versions, not just each product's current one
+#   --mine      only show products this machine has deployed via os-vault-deploy.
+#               Vault's API has no "created by" field, so this is tracked locally in
+#               .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
+#   --id        look up one specific product by id instead of listing every product
+#               (repeat --id to look up several at once, e.g. --id foo --id bar).
+#   --backfill  one-time: seed that local log with every product currently in Vault,
+#               for products deployed before --mine tracking existed. Internal
+#               products are skipped unless --include-internal is also passed.
 
 set -euo pipefail
 
@@ -18,26 +23,72 @@ os_load_config
 os_load_env
 
 ONLY_CURRENT="true"
-if [ "${1:-}" = "--all" ]; then
-    ONLY_CURRENT="false"
-fi
+MINE_ONLY="false"
+BACKFILL="false"
+INCLUDE_INTERNAL="false"
+IDS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --all) ONLY_CURRENT="false" ;;
+        --mine) MINE_ONLY="true" ;;
+        --backfill) BACKFILL="true" ;;
+        --include-internal) INCLUDE_INTERNAL="true" ;;
+        --id)
+            shift
+            if [ -z "${1:-}" ]; then
+                os_print_error "--id requires a product id argument"
+                exit 1
+            fi
+            IDS+=("$1")
+            ;;
+        *)
+            os_print_error "Unknown option: $1"
+            os_print_info "Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]"
+            os_print_info "       os-vault-products --backfill [--include-internal]"
+            exit 1
+            ;;
+    esac
+    shift
+done
 
 if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
     os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
     exit 1
 fi
 
+LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
+
+if [ "${BACKFILL}" = "true" ]; then
+    os_print_separator
+    os_print_header "OpenSpec — Vault Products (backfill --mine log)"
+    os_print_separator
+    os_print_info "Vault URL : ${VAULT_BASE_URL}"
+    os_print_info "Records every product currently in Vault into the local --mine"
+    os_print_info "log, for products deployed before that tracking existed."
+    os_print_separator
+    "${OS_PYTHON}" "${OS_CLI_LIB}/vault_backfill_mine_log.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${LOG_FILE}" "${INCLUDE_INTERNAL}"
+    os_print_separator
+    exit 0
+fi
+
 os_print_separator
 os_print_header "OpenSpec — Vault Products"
 os_print_separator
 os_print_info "Vault URL : ${VAULT_BASE_URL}"
+if [ ${#IDS[@]} -gt 0 ]; then
+    os_print_info "Product ID(s) : ${IDS[*]}"
+fi
 if [ "${ONLY_CURRENT}" = "true" ]; then
     os_print_info "Filter    : current versions only (use --all to include superseded ones)"
 else
     os_print_info "Filter    : all versions"
 fi
+if [ "${MINE_ONLY}" = "true" ]; then
+    os_print_info "Scope     : only products deployed from this machine (--mine)"
+fi
 os_print_separator
 
-"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}" "${IDS[@]}"
 
 os_print_separator
