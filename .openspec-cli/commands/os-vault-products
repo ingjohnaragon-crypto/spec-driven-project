@@ -1,16 +1,32 @@
 #!/usr/bin/bash
 # os-vault-products — List Smart Contract products deployed in Vault
-# Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]
+# Usage: os-vault-products [--mine] [--all] [--all-unsafe] [--id <product_id> ...]
 #        os-vault-products --backfill [--include-internal]
-#   --all       also list superseded (non-current) versions, not just each product's current one
-#   --mine      only show products this machine has deployed via os-vault-deploy.
-#               Vault's API has no "created by" field, so this is tracked locally in
-#               .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
-#   --id        look up one specific product by id instead of listing every product
-#               (repeat --id to look up several at once, e.g. --id foo --id bar).
-#   --backfill  one-time: seed that local log with every product currently in Vault,
-#               for products deployed before --mine tracking existed. Internal
-#               products are skipped unless --include-internal is also passed.
+#        os-vault-products --prune
+#
+# With no flags at all, this behaves as --mine (current versions only): the
+# Vault sandbox is shared across teams, so listing "everything" by default
+# is neither safe nor useful.
+#
+#   --mine        only show products this machine has deployed via os-vault-deploy,
+#                 filtered through the local allowlist/prefix (see --backfill below).
+#   --all         also list superseded (non-current) versions, not just each
+#                 product's current one. Combined with --mine or --id this is cheap;
+#                 alone (whole shared sandbox) it also requires --all-unsafe.
+#   --all-unsafe  required together with --all when neither --mine nor --id narrow
+#                 the scope, since that means an HTTP call per product in the
+#                 shared sandbox. Still prompts for confirmation with the count.
+#   --id          look up one specific product by id instead of listing every product
+#                 (repeat --id to look up several at once, e.g. --id foo --id bar).
+#   --backfill    one-time: seed the local --mine log with every product currently in
+#                 Vault that is in the allowlist (.openspec-cli/.vault-products-allowlist.txt)
+#                 or matches the "openspec_" prefix -- for products deployed before
+#                 --mine tracking existed. Internal products are skipped unless
+#                 --include-internal is also passed.
+#   --prune       rewrite the local --mine log to drop any entry that is NOT in the
+#                 allowlist/prefix (cleans up contamination from before this filter
+#                 existed). Backs up the log to <log>.bak first. Local-only, no
+#                 Vault calls.
 
 set -euo pipefail
 
@@ -24,15 +40,20 @@ os_load_env
 
 ONLY_CURRENT="true"
 MINE_ONLY="false"
+ALL_UNSAFE="false"
 BACKFILL="false"
+PRUNE="false"
 INCLUDE_INTERNAL="false"
+SCOPE_FLAG_SEEN="false"
 IDS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --all) ONLY_CURRENT="false" ;;
-        --mine) MINE_ONLY="true" ;;
+        --all) ONLY_CURRENT="false"; SCOPE_FLAG_SEEN="true" ;;
+        --all-unsafe) ONLY_CURRENT="false"; ALL_UNSAFE="true"; SCOPE_FLAG_SEEN="true" ;;
+        --mine) MINE_ONLY="true"; SCOPE_FLAG_SEEN="true" ;;
         --backfill) BACKFILL="true" ;;
+        --prune) PRUNE="true" ;;
         --include-internal) INCLUDE_INTERNAL="true" ;;
         --id)
             shift
@@ -41,11 +62,13 @@ while [ $# -gt 0 ]; do
                 exit 1
             fi
             IDS+=("$1")
+            SCOPE_FLAG_SEEN="true"
             ;;
         *)
             os_print_error "Unknown option: $1"
-            os_print_info "Usage: os-vault-products [--all] [--mine] [--id <product_id> ...]"
+            os_print_info "Usage: os-vault-products [--mine] [--all] [--all-unsafe] [--id <product_id> ...]"
             os_print_info "       os-vault-products --backfill [--include-internal]"
+            os_print_info "       os-vault-products --prune"
             exit 1
             ;;
     esac
@@ -58,18 +81,47 @@ if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
 fi
 
 LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
+ALLOWLIST_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-products-allowlist.txt"
+
+if [ "${PRUNE}" = "true" ]; then
+    os_print_separator
+    os_print_header "OpenSpec — Vault Products (prune --mine log)"
+    os_print_separator
+    os_print_info "Log       : ${LOG_FILE}"
+    os_print_info "Allowlist : ${ALLOWLIST_FILE}"
+    os_print_separator
+    "${OS_PYTHON}" "${OS_CLI_LIB}/vault_prune_mine_log.py" "${LOG_FILE}" "${ALLOWLIST_FILE}"
+    os_print_separator
+    exit 0
+fi
 
 if [ "${BACKFILL}" = "true" ]; then
     os_print_separator
     os_print_header "OpenSpec — Vault Products (backfill --mine log)"
     os_print_separator
     os_print_info "Vault URL : ${VAULT_BASE_URL}"
-    os_print_info "Records every product currently in Vault into the local --mine"
-    os_print_info "log, for products deployed before that tracking existed."
+    os_print_info "Allowlist : ${ALLOWLIST_FILE}"
+    os_print_info "Records products in the allowlist, or matching the 'openspec_' prefix,"
+    os_print_info "into the local --mine log -- for products deployed before that tracking existed."
     os_print_separator
-    "${OS_PYTHON}" "${OS_CLI_LIB}/vault_backfill_mine_log.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${LOG_FILE}" "${INCLUDE_INTERNAL}"
+    "${OS_PYTHON}" "${OS_CLI_LIB}/vault_backfill_mine_log.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${LOG_FILE}" "${INCLUDE_INTERNAL}" "${ALLOWLIST_FILE}"
     os_print_separator
     exit 0
+fi
+
+# Shared sandbox: no scope flag at all defaults to --mine rather than
+# dumping every team's products.
+if [ "${SCOPE_FLAG_SEEN}" = "false" ]; then
+    MINE_ONLY="true"
+fi
+
+# --all across the whole shared sandbox (no --mine, no --id) is an N+1 call
+# per product -- require the explicit escape hatch up front.
+if [ "${ONLY_CURRENT}" = "false" ] && [ "${MINE_ONLY}" = "false" ] && [ ${#IDS[@]} -eq 0 ] && [ "${ALL_UNSAFE}" != "true" ]; then
+    os_print_error "--all without --mine or --id would list every product version in this shared Vault sandbox."
+    os_print_info  "Pass --mine to scope to your own products, --id <product_id> for specific ones,"
+    os_print_info  "or --all-unsafe to confirm you really want the whole sandbox."
+    exit 1
 fi
 
 os_print_separator
@@ -89,6 +141,6 @@ if [ "${MINE_ONLY}" = "true" ]; then
 fi
 os_print_separator
 
-"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}" "${IDS[@]}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}" "${ALL_UNSAFE}" "${IDS[@]}"
 
 os_print_separator

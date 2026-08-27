@@ -19,15 +19,24 @@ a log file, and this script filters the live product list against it.
 Optionally, one or more product ids can be requested directly via
 GET /v1/products:batchGet instead of listing every product.
 
+The Vault sandbox this talks to is shared across teams, so --all without
+--mine or explicit product ids means "list every version of every product
+anyone has ever deployed here" -- an N+1 GET /v1/product-versions call per
+product. The caller (os-vault-products) gates that behind an explicit
+--all-unsafe flag; this script additionally prompts for confirmation with
+the product count before starting that loop, and bails out with a clear
+message (instead of hanging) if the loop runs past TIMEOUT_SECONDS.
+
 Usage:
   py vault_products_fetch_and_print.py <base_url> <token> <only_current:true|false> \
-      <mine_only:true|false> [log_file] [product_id ...]
+      <mine_only:true|false> [log_file] [allow_unsafe:true|false] [product_id ...]
 """
 from __future__ import annotations
 
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,6 +47,7 @@ RESET = "\033[0m"
 
 PAGE_SIZE = 30
 BATCH_SIZE = 30
+TIMEOUT_SECONDS = 30
 
 
 def err(msg: str) -> None:
@@ -128,16 +138,18 @@ def main() -> int:
     if len(sys.argv) < 5:
         print(
             "Usage: py vault_products_fetch_and_print.py <base_url> <token> <only_current> "
-            "<mine_only> [log_file] [product_id ...]",
+            "<mine_only> [log_file] [allow_unsafe] [product_id ...]",
             file=sys.stderr,
         )
         return 1
 
     base_url, token, only_current_arg, mine_only_arg = sys.argv[1:5]
     log_file = sys.argv[5] if len(sys.argv) > 5 else ""
-    requested_ids = sys.argv[6:]
+    allow_unsafe_arg = sys.argv[6] if len(sys.argv) > 6 else "false"
+    requested_ids = sys.argv[7:]
     only_current = only_current_arg.lower() == "true"
     mine_only = mine_only_arg.lower() == "true"
+    allow_unsafe = allow_unsafe_arg.lower() == "true"
 
     try:
         if requested_ids:
@@ -168,6 +180,24 @@ def main() -> int:
         print("\n  (no products found -- deploy one with os-vault-deploy)")
         return 0
 
+    # --all without --mine or explicit ids means "every version of every
+    # product in a shared sandbox". The caller already required --all-unsafe
+    # to get here; still confirm with the actual count before the N+1 loop.
+    if not only_current and not mine_only and not requested_ids:
+        print(f"\n  About to fetch version history for all {len(products)} product(s) in this shared Vault instance.")
+        try:
+            answer = input("  Continue? [y/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("y", "yes"):
+            print("  Cancelled.")
+            return 0
+        if not allow_unsafe:
+            # Defensive: shouldn't be reachable since the caller gates this,
+            # but don't proceed against the whole sandbox without it either way.
+            err("Refusing to list all versions of every product without --all-unsafe.")
+            return 1
+
     rows: list[tuple[str, str, str, str, str, bool]] = []
 
     if only_current:
@@ -195,7 +225,14 @@ def main() -> int:
                 bool(p.get("is_internal", False)),
             ))
     else:
-        for p in products:
+        loop_start = time.monotonic()
+        for idx, p in enumerate(products):
+            if time.monotonic() - loop_start > TIMEOUT_SECONDS:
+                warn(
+                    f"Timeout after {TIMEOUT_SECONDS}s -- showing partial results "
+                    f"({idx}/{len(products)} products checked)"
+                )
+                break
             product_id = p.get("id", "?")
             is_internal = bool(p.get("is_internal", False))
             try:
