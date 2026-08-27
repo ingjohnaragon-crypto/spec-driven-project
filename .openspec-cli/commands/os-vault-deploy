@@ -58,14 +58,24 @@ trap "rm -f ${PAYLOAD_FILE}" EXIT
 os_step "Calling POST /v1/product-versions ..."
 
 RESULT_FILE=$(mktemp /tmp/os-vault-deploy-result-XXXXXX.json)
-trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+CURL_ERR_FILE=$(mktemp /tmp/os-vault-deploy-err-XXXXXX)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE} ${CURL_ERR_FILE}" EXIT
 
-HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+set +e
+HTTP_STATUS=$(curl -sS -o "${RESULT_FILE}" -w "%{http_code}" \
     -X POST \
     -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d @"${PAYLOAD_FILE}" \
-    "${VAULT_BASE_URL}/v1/product-versions")
+    "${VAULT_BASE_URL}/v1/product-versions" 2>"${CURL_ERR_FILE}")
+CURL_EXIT=$?
+set -e
+
+if [ "${CURL_EXIT}" != "0" ]; then
+    os_print_error "Could not reach Vault (curl exit code ${CURL_EXIT}):"
+    cat "${CURL_ERR_FILE}" >&2
+    exit 1
+fi
 
 if [ "${HTTP_STATUS}" != "200" ]; then
     os_print_error "Deploy failed (HTTP ${HTTP_STATUS}):"
@@ -74,5 +84,8 @@ if [ "${HTTP_STATUS}" != "200" ]; then
 fi
 
 "${OS_PYTHON}" "${OS_CLI_LIB}/vault_deploy_print_result.py" "${RESULT_FILE}"
+
+LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_log_deploy.py" "${RESULT_FILE}" "${LOG_FILE}" "${CONTRACT_FILE}"
 
 os_print_separator

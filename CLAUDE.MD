@@ -102,6 +102,7 @@ os-vault-simulate contracts/<product>.py <start> <end> '<params>'
 os-vault-deploy contracts/<product>.py <product_id> "<display name>"
 os-vault-products                      # listar productos desplegados en Vault
 os-vault-products --all                # incluir versiones no vigentes
+os-vault-products --mine               # solo productos desplegados desde esta máquina (os-vault-deploy)
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```

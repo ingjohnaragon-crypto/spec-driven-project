@@ -1,11 +1,10 @@
 #!/usr/bin/bash
-# os-vault-products — List Smart Contract products (product versions) deployed in Vault
-# Usage: os-vault-products [--all]
-#   (default: only current/active product versions; --all also lists superseded versions)
-#
-# Vault's GET /v1/product-versions requires a product_id (there is no "list
-# versions across all products" call), so the fetch is two-step: list all
-# Products, then the version(s) for each one. See vault_products_fetch_and_print.py.
+# os-vault-products — List Smart Contract products deployed in Vault
+# Usage: os-vault-products [--all] [--mine]
+#   --all   also list superseded (non-current) versions, not just each product's current one
+#   --mine  only show products this machine has deployed via os-vault-deploy.
+#           Vault's API has no "created by" field, so this is tracked locally in
+#           .openspec-cli/.vault-deployed-products.log (written by os-vault-deploy).
 
 set -euo pipefail
 
@@ -18,14 +17,25 @@ os_load_config
 os_load_env
 
 ONLY_CURRENT="true"
-if [ "${1:-}" = "--all" ]; then
-    ONLY_CURRENT="false"
-fi
+MINE_ONLY="false"
+for arg in "$@"; do
+    case "$arg" in
+        --all) ONLY_CURRENT="false" ;;
+        --mine) MINE_ONLY="true" ;;
+        *)
+            os_print_error "Unknown option: ${arg}"
+            os_print_info "Usage: os-vault-products [--all] [--mine]"
+            exit 1
+            ;;
+    esac
+done
 
 if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
     os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
     exit 1
 fi
+
+LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
 
 os_print_separator
 os_print_header "OpenSpec — Vault Products"
@@ -36,8 +46,11 @@ if [ "${ONLY_CURRENT}" = "true" ]; then
 else
     os_print_info "Filter    : all versions"
 fi
+if [ "${MINE_ONLY}" = "true" ]; then
+    os_print_info "Scope     : only products deployed from this machine (--mine)"
+fi
 os_print_separator
 
-"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_products_fetch_and_print.py" "${VAULT_BASE_URL}" "${VAULT_TOKEN}" "${ONLY_CURRENT}" "${MINE_ONLY}" "${LOG_FILE}"
 
 os_print_separator
