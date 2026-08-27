@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 RED = "\033[0;31m"
@@ -40,14 +41,16 @@ def vault_get(base_url: str, token: str, path: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def paginated_get(base_url: str, token: str, path: str, list_key: str) -> list:
+def paginated_get(base_url: str, token: str, path: str, list_key: str, params: dict | None = None) -> list:
     items: list = []
     page_token = ""
+    base_params = dict(params or {})
     while True:
-        sep = "&" if "?" in path else "?"
-        url = f"{path}{sep}page_size={PAGE_SIZE}"
+        query = dict(base_params)
+        query["page_size"] = PAGE_SIZE
         if page_token:
-            url += f"&page_token={page_token}"
+            query["page_token"] = page_token
+        url = f"{path}?{urllib.parse.urlencode(query)}"
         data = vault_get(base_url, token, url)
         items.extend(data.get(list_key, []))
         page_token = data.get("next_page_token", "")
@@ -72,7 +75,7 @@ def main() -> int:
     only_current = only_current_arg.lower() == "true"
 
     try:
-        products = paginated_get(base_url, token, "/v1/products", "products")
+        products = paginated_get(base_url, token, "/v1/products", "products", {})
     except urllib.error.HTTPError as e:
         err(f"Fetching products failed (HTTP {e.code}):")
         print(e.read().decode(errors="replace"), file=sys.stderr)
@@ -88,11 +91,11 @@ def main() -> int:
     rows = []
     for product in products:
         product_id = product.get("id", "?")
-        path = f"/v1/product-versions?product_id={product_id}"
+        params = {"product_id": product_id}
         if only_current:
-            path += "&is_current=true"
+            params["is_current"] = "true"
         try:
-            rows.extend(paginated_get(base_url, token, path, "product_versions"))
+            rows.extend(paginated_get(base_url, token, "/v1/product-versions", "product_versions", params))
         except urllib.error.HTTPError as e:
             warn(f"Could not fetch versions for product '{product_id}' (HTTP {e.code})")
         except urllib.error.URLError as e:
