@@ -34,18 +34,28 @@ else
 fi
 os_print_separator
 
-RESULT_FILE=$(mktemp /tmp/os-vault-products-XXXXXX.json)
-trap "rm -f ${RESULT_FILE}" EXIT
-
 URL="${VAULT_BASE_URL}/v1/product-versions?page_size=50"
 if [ "${ONLY_CURRENT}" = "true" ]; then
     URL="${URL}&is_current=true"
 fi
 
-HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+RESULT_FILE=$(mktemp /tmp/os-vault-products-XXXXXX.json)
+CURL_ERR_FILE=$(mktemp /tmp/os-vault-products-err-XXXXXX)
+trap "rm -f ${RESULT_FILE} ${CURL_ERR_FILE}" EXIT
+
+set +e
+HTTP_STATUS=$(curl -sS -o "${RESULT_FILE}" -w "%{http_code}" \
     -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
-    "${URL}")
+    "${URL}" 2>"${CURL_ERR_FILE}")
+CURL_EXIT=$?
+set -e
+
+if [ "${CURL_EXIT}" != "0" ]; then
+    os_print_error "Could not reach Vault (curl exit code ${CURL_EXIT}):"
+    cat "${CURL_ERR_FILE}" >&2
+    exit 1
+fi
 
 if [ "${HTTP_STATUS}" != "200" ]; then
     os_print_error "Fetching products failed (HTTP ${HTTP_STATUS}):"
