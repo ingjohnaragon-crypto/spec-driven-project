@@ -14,7 +14,11 @@ Per the Vault Core API docs:
 
 Vault has no "created by" concept, so "only what I deployed" (--mine) is
 tracked locally: os-vault-deploy appends a JSON line per successful deploy to
-a log file, and this script filters the live product list against it.
+a log file. When --mine is set and no explicit product ids were requested,
+those logged ids are fetched directly via GET /v1/products:batchGet -- the
+same one-call path as --id -- instead of paging through every product in
+the (potentially large, shared) instance just to filter it down afterward.
+Paginating the full list is only used when there's no scope at all.
 
 Optionally, one or more product ids can be requested directly via
 GET /v1/products:batchGet instead of listing every product.
@@ -151,6 +155,14 @@ def main() -> int:
     mine_only = mine_only_arg.lower() == "true"
     allow_unsafe = allow_unsafe_arg.lower() == "true"
 
+    mine_ids: set | None = None
+    if mine_only:
+        mine_ids = load_mine_ids(log_file)
+        if mine_ids is None:
+            print(f"\n  (no local deploy history found -- {log_file or 'the log file'} doesn't exist yet)")
+            print("  Deploy something with os-vault-deploy first, or drop --mine to see every product in this Vault instance.")
+            return 0
+
     try:
         if requested_ids:
             found = batch_get(base_url, token, "/v1/products:batchGet", requested_ids, "products")
@@ -158,6 +170,12 @@ def main() -> int:
             for pid in requested_ids:
                 if pid not in found:
                     warn(f"Product '{pid}' not found")
+        elif mine_only:
+            if not mine_ids:
+                print("\n  (--mine log exists but has no recorded products)")
+                return 0
+            found = batch_get(base_url, token, "/v1/products:batchGet", sorted(mine_ids), "products")
+            products = list(found.values())
         else:
             products = paginated_get(base_url, token, "/v1/products", "products", {})
     except urllib.error.HTTPError as e:
@@ -168,12 +186,9 @@ def main() -> int:
         err(f"Could not reach Vault: {e.reason}")
         return 1
 
-    if mine_only:
-        mine_ids = load_mine_ids(log_file)
-        if mine_ids is None:
-            print(f"\n  (no local deploy history found -- {log_file or 'the log file'} doesn't exist yet)")
-            print("  Deploy something with os-vault-deploy first, or drop --mine to see every product in this Vault instance.")
-            return 0
+    if mine_only and requested_ids:
+        # --mine combined with explicit --id: still gate the requested id(s)
+        # against local deploy history.
         products = [p for p in products if p.get("id") in mine_ids]
 
     if not products:
