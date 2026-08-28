@@ -35,7 +35,7 @@ from contracts_api import (
 from decimal import Decimal, ROUND_HALF_UP
 
 api          = "4.0.0"
-version      = "1.1.0"
+version      = "1.2.1"
 display_name = "Basic Savings Account"
 summary      = "Savings account with monthly interest accrual"
 description  = (
@@ -78,10 +78,10 @@ parameters = [
 ]
 
 event_types = [
-    SmartContractEventType(
-        name=INTEREST_ACCRUAL,
-        scheduler_tag_ids=["SAVINGS_INTEREST_ACCRUAL_AST"],
-    ),
+    # No scheduler_tag_ids: a referenced tag must already exist in the target
+    # Vault instance or POST /v1/accounts fails with TAG_NOT_FOUND. Ops can
+    # attach a tag at deploy time if schedule management is needed.
+    SmartContractEventType(name=INTEREST_ACCRUAL),
 ]
 
 event_types_groups = []

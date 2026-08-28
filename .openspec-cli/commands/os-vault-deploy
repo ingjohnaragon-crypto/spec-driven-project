@@ -2,7 +2,8 @@
 # os-vault-deploy — Deploy a Smart Contract as a ProductVersion in Vault Core
 # Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]
 # Example:
-#   os-vault-deploy contracts/savings_product.py savings_product "Savings Product v2" 3.11.0
+#   os-vault-deploy contracts/savings_product.py openspec_savings_product "Savings Product"
+#   (api_version defaults to 4.0.0 — override only for a legacy 3.x contract)
 
 set -euo pipefail
 
@@ -17,11 +18,11 @@ os_load_env
 CONTRACT_FILE="${1:-}"
 PRODUCT_ID="${2:-}"
 DISPLAY_NAME="${3:-}"
-API_VERSION="${4:-3.11.0}"
+API_VERSION="${4:-4.0.0}"
 
 if [ -z "${CONTRACT_FILE}" ] || [ -z "${PRODUCT_ID}" ] || [ -z "${DISPLAY_NAME}" ]; then
     os_print_error "Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]"
-    os_print_info  "Example: os-vault-deploy contracts/savings_product.py savings_product \"Savings Product\" 3.11.0"
+    os_print_info  "Example: os-vault-deploy contracts/savings_product.py openspec_savings_product \"Savings Product\""
     exit 1
 fi
 

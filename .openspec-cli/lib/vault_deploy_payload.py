@@ -23,7 +23,7 @@ import uuid
 contract_file = sys.argv[1]
 product_id    = sys.argv[2]
 display_name  = sys.argv[3]
-api_version   = sys.argv[4] if len(sys.argv) > 4 else "3.11.0"
+api_version   = sys.argv[4] if len(sys.argv) > 4 else "4.0.0"
 
 with open(contract_file, encoding="utf-8") as f:
     code = f.read()

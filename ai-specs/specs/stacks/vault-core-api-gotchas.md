@@ -153,6 +153,43 @@ def scheduled_event_hook(vault, hook_arguments): ...
 - La dependencia es la unión de lo que el hook y sus helpers (`_handle_x(vault)`, `_param(vault, ...)`) tocan.
 - `vault_lint.py` lo verifica: reglas `MISSING_PARAMETERS_REQUIREMENT` / `MISSING_BALANCES_FETCHER`.
 
+## 3.3 E2E contra el sandbox real (sesión 2026-08-28, con VPN)
+
+Cadena `savings_product`: customer → deploy → account → posting → balances.
+
+| Paso | Endpoint | Resultado |
+|---|---|---|
+| Customer | `POST /v1/customers` | ✅ 200 |
+| Deploy | `POST /v1/product-versions` | ✅ 200 — el contrato API 4.0 con `@requires` / `@fetch_account_data` / `update_permission` desplegó limpio (`product_version_id` nuevo) |
+| Account | `POST /v1/accounts` | ✅ 200 (tras crear el schedule tag, ver abajo) |
+| Posting | `POST /v1/posting-instruction-batches` | ❌ **403 `PERMISSION_DENIED`** — el token del lab no tiene scope para este endpoint. El comando `os-vault-posting` está bien (endpoint + payload correctos); hace falta un token con permiso, o postear desde el dashboard. **Alternativa: `create_posting_instruction_batch` dentro de `simulate` no está permission-gated** y sí refleja el movimiento de saldo. |
+| Balances | `GET /v1/balances/live?account_ids=…&page_size=50` | ✅ 200 — lista plana, `DEFAULT/GBP` en las 3 fases |
+
+### 3.3.1 `scheduler_tag_ids` debe existir antes de abrir la cuenta
+
+`POST /v1/accounts` falla con `TAG_NOT_FOUND` / `violation_type: TAG_NOT_FOUND` si el
+`.py` declara `SmartContractEventType(name=..., scheduler_tag_ids=["X"])` y el tag `X`
+no existe en la instancia. `simulate` **no** valida esto — sólo el account real.
+
+Opciones:
+- No poner `scheduler_tag_ids` en el contrato (los 5 contratos de OpenSpec quedaron así).
+- Crearlo antes: `POST /v1/account-schedule-tags` con
+  `{"request_id","account_schedule_tag":{"id":"X","description":"...","sends_scheduled_operation_reports":false,"schedule_status_override":"ACCOUNT_SCHEDULE_TAG_SCHEDULE_STATUS_OVERRIDE_NO_OVERRIDE"}}`.
+
+### 3.3.2 `contracts_language_api_version` en el deploy
+
+`os-vault-deploy` manda `contracts_language_api_version` desde el **4º argumento**, no
+desde el campo `api` del `.py`. El default ahora es `4.0.0`; pasar `3.11.0` (o un
+3.x) sólo para un contrato legacy.
+
+### 3.3.3 Observación de modelado (fuera de scope del deploy)
+
+Vía simulate se ve que el `scheduled_event_hook` de `savings_product` mueve el interés
+de `DEFAULT` a `ACCRUED_INTEREST` **debitando la propia cuenta del cliente** — su total
+no cambia (1000 → 996.16 en DEFAULT + 3.84 en ACCRUED_INTEREST). Falta un paso "aplicar
+interés" con la pata contra una cuenta de gasto/ingreso del banco. Es un bug de
+modelado del contrato, no de integración.
+
 ## 4. Endpoints que SÍ funcionan pese al problema de streaming
 
 `/v1/product-versions`, `/v1/customers`, `/v1/product-versions:batchGet` no son streaming y no se ven afectados por la inspección TLS — se puede seguir trabajando en deploy/customer/account mientras se espera la aprobación de red para simulate.
