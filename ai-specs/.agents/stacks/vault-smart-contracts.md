@@ -115,7 +115,8 @@ import datetime   # ← never
 from contracts_api import (
     BalanceCoordinate, BalanceDefaultDict, Balance,
     Phase, Tside,
-    Parameter, ParameterLevel, NumberShape, StringShape,
+    Parameter, ParameterLevel, ParameterUpdatePermission,
+    NumberShape, StringShape,
     DenominationShape, UnionShape, UnionItem,
     ScheduledEvent, SmartContractEventType, EndOfMonthSchedule,
     Rejection, RejectionReason,           # API 4.0: Rejection not Rejected
@@ -292,6 +293,45 @@ Parameter(
 )
 ```
 
+### 10. `ParameterLevel.INSTANCE` requires `update_permission`; DERIVED/TEMPLATE must NOT set it
+
+Enforced by `vault_lint.py` (`INSTANCE_UPDATE_PERMISSION` / `DERIVED_UPDATE_PERMISSION`).
+
+Every non-derived `Parameter(level=ParameterLevel.INSTANCE, ...)` must declare
+`update_permission=ParameterUpdatePermission.USER_EDITABLE` (or `OPS_EDITABLE` /
+`USER_EDITABLE_WITH_OPS_PERMISSION` / `FIXED`). Without it the **deploy** fails with
+`"Update_permission and (default value or optional) for parameter <name> ... must be
+specified for parameters at instance level"` — the message points at the deploy but
+the fix is in the contract code. `update_permission` is **not supported** for
+`derived=True` or `ParameterLevel.TEMPLATE` parameters; adding it there is rejected.
+
+Enum values have **no type prefix**: `USER_EDITABLE`, not `PARAMETER_UPDATE_PERMISSION_USER_EDITABLE`.
+
+```python
+# CORRECT — editable instance parameter
+Parameter(
+    name="denomination",
+    shape=DenominationShape(permitted_denominations=supported_denominations),
+    level=ParameterLevel.INSTANCE,
+    update_permission=ParameterUpdatePermission.USER_EDITABLE,   # required
+    display_name="Denomination",
+    default_value="GBP",
+)
+
+# CORRECT — derived parameter: no update_permission
+Parameter(
+    name="accrued_interest", shape=NumberShape(),
+    level=ParameterLevel.INSTANCE, derived=True, display_name="Accrued Interest",
+)
+
+# WRONG — INSTANCE without update_permission → deploy rejected
+Parameter(name="denomination", shape=DenominationShape(),
+          level=ParameterLevel.INSTANCE, default_value="GBP")
+```
+
+Note: `default_value` on an INSTANCE parameter only applies to account **migrations**,
+never to normal account creation — the real value is supplied by `os-vault-account`.
+
 ---
 
 ## Contract template (API 4.0)
@@ -301,7 +341,8 @@ from contracts_api import (
     ActivationHookArguments, ActivationHookResult,
     BalanceCoordinate, BalanceDefaultDict,
     CustomInstruction, DenominationShape, EndOfMonthSchedule,
-    NumberShape, Parameter, ParameterLevel, Phase, Posting,
+    NumberShape, Parameter, ParameterLevel, ParameterUpdatePermission,
+    Phase, Posting,
     PostingInstructionsDirective, PostPostingHookArguments,
     PostPostingHookResult, PrePostingHookArguments, PrePostingHookResult,
     Rejection, RejectionReason, ScheduledEvent,
@@ -334,6 +375,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         default_value="GBP",
     ),
@@ -462,6 +504,32 @@ args = ScheduledEventHookArguments(
 
 ---
 
+## Deploy to the shared sandbox (Vault Core API — session findings)
+
+The Accelerathon labs sandbox is **shared across teams**. Rules learned the hard way
+(full detail in `ai-specs/specs/stacks/vault-core-api-gotchas.md`):
+
+- **`product_id` must carry an own prefix** — e.g. `openspec_current_account`, never the
+  bare `current_account`. Vault treats `product_id` as a reserved product family and
+  rejects a deploy that collides with a pre-existing product (`"contract with name:X
+  already exists"`).
+- **Bump `version` in the `.py` for every real deploy attempt.** Re-deploying the same
+  `version` for a `product_id` fails with `"Product template with same version number
+  X.X.X already exists"`.
+- **TEMPLATE / GLOBAL parameters need a value in the deploy payload** (`params[]` of
+  `POST /v1/product-versions`). `vault_deploy_payload.py` extracts these from the
+  contract AST — `Decimal("x")`, plain constants, and `OptionalValue(UnionItemValue("false"))`.
+- **INSTANCE parameters are NOT given a value at deploy** — every INSTANCE param
+  (including `denomination`) is required at account creation via `os-vault-account`.
+- **Auth header is `X-Auth-Token: <token>`**, plain token — not `Authorization: Bearer`.
+  The labs sandbox is not JWT.
+- **`/v1/contracts:simulate` is streaming NDJSON** (`application/x-ndjson`, chunked).
+  Corporate TLS inspection (Zscaler) can silently truncate it — HTTP 200, empty body.
+  `os-vault-simulate` consumes it line by line; `os-vault-deploy` / `-account` /
+  `-balances` are plain JSON and unaffected.
+- **Balances**: use `/v1/balances/live?account_ids=<id>&page_size=50` (plural
+  `account_ids`); `/v2/balances/live` returns 404 in this sandbox.
+
 ## OpenSpec workflow
 
 ```bash
@@ -497,4 +565,6 @@ os-review 1 && os-review-apply 1
 - All balance reads use `BalanceCoordinate` explicitly
 - Phase is always read from `BalanceCoordinate` (key), never from `Balance` (value)
 - `instruction_details` carries traceability — no `client_transaction_id`
-- Only `contracts_api` and `decimal` imports allowed in contract code
+- Only `contracts_api`, `decimal` and `zoneinfo` imports allowed in contract code
+- Every INSTANCE parameter declares `update_permission`; DERIVED/TEMPLATE never do
+- `product_id` for a real deploy uses an own prefix (`openspec_…`); bump `version` per deploy

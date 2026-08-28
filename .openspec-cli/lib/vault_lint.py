@@ -44,6 +44,10 @@ DISPLAY_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("ZoneInfo used (not timezone.utc)", frozenset({"TIMEZONE_UTC"})),
     ("No client_transaction_id", frozenset({"CLIENT_TRANSACTION_ID"})),
     ("Phase read from BalanceCoordinate", frozenset({"PHASE_ON_BALANCE"})),
+    (
+        "INSTANCE params declare update_permission",
+        frozenset({"INSTANCE_UPDATE_PERMISSION", "DERIVED_UPDATE_PERMISSION"}),
+    ),
 )
 
 _GREEN = "\033[0;32m"
@@ -155,7 +159,46 @@ class VaultLintVisitor(ast.NodeVisitor):
                     "CLIENT_TRANSACTION_ID",
                     "client_transaction_id is not allowed — use instruction_details",
                 )
+        if isinstance(node.func, ast.Name) and node.func.id == "Parameter":
+            self._check_parameter_update_permission(node)
         self.generic_visit(node)
+
+    def _check_parameter_update_permission(self, node: ast.Call) -> None:
+        """INSTANCE parameters require update_permission; DERIVED must not set it.
+
+        Vault's POST /v1/product-versions rejects an instance-level parameter
+        with no update_permission (misleading error points at the deploy, but
+        the fix is in the contract). update_permission is not supported for
+        DERIVED/TEMPLATE parameters.
+        """
+        name = "<unknown>"
+        level_is_instance = False
+        is_derived = False
+        has_update_permission = False
+        for kw in node.keywords:
+            if kw.arg == "name" and isinstance(kw.value, ast.Constant):
+                name = str(kw.value.value)
+            elif kw.arg == "level" and isinstance(kw.value, ast.Attribute):
+                level_is_instance = kw.value.attr == "INSTANCE"
+            elif kw.arg == "derived":
+                is_derived = isinstance(kw.value, ast.Constant) and kw.value.value is True
+            elif kw.arg == "update_permission":
+                has_update_permission = True
+
+        if is_derived and has_update_permission:
+            self._add(
+                node,
+                "DERIVED_UPDATE_PERMISSION",
+                f"derived parameter {name!r} must not set update_permission "
+                "(not supported for DERIVED/TEMPLATE)",
+            )
+        elif level_is_instance and not is_derived and not has_update_permission:
+            self._add(
+                node,
+                "INSTANCE_UPDATE_PERMISSION",
+                f"INSTANCE parameter {name!r} must set update_permission="
+                "ParameterUpdatePermission.USER_EDITABLE (required by Vault deploy)",
+            )
 
     def visit_Constant(self, node: ast.Constant) -> None:
         if isinstance(node.value, float):
