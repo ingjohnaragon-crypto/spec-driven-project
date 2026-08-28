@@ -30,6 +30,8 @@ from contracts_api import (
     ScheduledEventHookResult,
     SmartContractEventType,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -130,7 +132,9 @@ event_types = [
 
 event_types_groups = []
 
-balance_observation_fetchers = [
+# API 4.0: hooks that call get_balances_observation() declare the fetcher here
+# and request it via @fetch_account_data on the hook.
+data_fetchers = [
     BalancesObservationFetcher(
         fetcher_id="live_balances",
         at=DefinedDateTime.LIVE,
@@ -287,6 +291,7 @@ def _param(vault, name: str):
 
 # ── Hooks ──────────────────────────────────────────────────────────────────────
 
+@requires(parameters=True)
 def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
@@ -348,6 +353,8 @@ def activation_hook(
     )
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
@@ -383,6 +390,7 @@ def pre_posting_hook(
     return PrePostingHookResult()
 
 
+@requires(parameters=True)
 def post_posting_hook(
     vault, hook_arguments: PostPostingHookArguments
 ) -> PostPostingHookResult:
@@ -432,6 +440,8 @@ def post_posting_hook(
     )
 
 
+@requires(event_type="MONTHLY_REPAYMENT", parameters=True)
+@fetch_account_data(event_type="MONTHLY_REPAYMENT", balances=["live_balances"])
 def scheduled_event_hook(
     vault, hook_arguments: ScheduledEventHookArguments
 ) -> ScheduledEventHookResult:

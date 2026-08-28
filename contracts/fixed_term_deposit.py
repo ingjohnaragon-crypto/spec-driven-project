@@ -38,6 +38,8 @@ from contracts_api import (
     UnionItem,
     UnionItemValue,
     UnionShape,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -144,7 +146,9 @@ event_types = [
 
 event_types_groups = []
 
-balance_observation_fetchers = [
+# API 4.0: hooks that call get_balances_observation() declare the fetcher here
+# and request it via @fetch_account_data on the hook.
+data_fetchers = [
     BalancesObservationFetcher(
         fetcher_id="live_balances",
         at=DefinedDateTime.LIVE,
@@ -191,6 +195,7 @@ def _get_early_closure_flag(vault) -> bool:
 
 # ── Hooks ──────────────────────────────────────────────────────────────────────
 
+@requires(parameters=True)
 def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
@@ -234,6 +239,8 @@ def activation_hook(
     )
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
@@ -275,6 +282,8 @@ def pre_posting_hook(
     return PrePostingHookResult()
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def post_posting_hook(
     vault, hook_arguments: PostPostingHookArguments
 ) -> PostPostingHookResult:
@@ -359,6 +368,10 @@ def post_posting_hook(
     )
 
 
+@requires(event_type="DAILY_ACCRUAL", parameters=True)
+@requires(event_type="MATURITY_EVENT", parameters=True)
+@fetch_account_data(event_type="DAILY_ACCRUAL", balances=["live_balances"])
+@fetch_account_data(event_type="MATURITY_EVENT", balances=["live_balances"])
 def scheduled_event_hook(
     vault, hook_arguments: ScheduledEventHookArguments
 ) -> ScheduledEventHookResult:
@@ -372,6 +385,8 @@ def scheduled_event_hook(
     )
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def derived_parameter_hook(
     vault, hook_arguments: DerivedParameterHookArguments
 ) -> DerivedParameterHookResult:

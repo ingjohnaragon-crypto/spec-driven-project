@@ -7,7 +7,9 @@ from contracts_api import (
     ActivationHookArguments,
     ActivationHookResult,
     BalanceDefaultDict,
+    BalancesObservationFetcher,
     CustomInstruction,
+    DefinedDateTime,
     DenominationShape,
     EndOfMonthSchedule,
     NumberShape,
@@ -27,6 +29,8 @@ from contracts_api import (
     ScheduledEventHookResult,
     SmartContractEventType,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -81,6 +85,12 @@ event_types = [
 ]
 
 event_types_groups = []
+
+# API 4.0: a hook that calls get_balances_observation() must declare the
+# fetcher here and request it via @fetch_account_data on the hook.
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 
 # ── Pure helpers ──────────────────────────────────────────────
 
@@ -139,6 +149,8 @@ def activation_hook(
     return ActivationHookResult(scheduled_events_return_value=scheduled_events)
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
@@ -173,6 +185,8 @@ def pre_posting_hook(
     return PrePostingHookResult()
 
 
+@requires(event_type="INTEREST_ACCRUAL", parameters=True)
+@fetch_account_data(event_type="INTEREST_ACCRUAL", balances=["live_balances"])
 def scheduled_event_hook(
     vault, hook_arguments: ScheduledEventHookArguments
 ) -> ScheduledEventHookResult:
