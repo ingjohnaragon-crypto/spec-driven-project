@@ -1,43 +1,45 @@
-# OpenSpec — Spec-Driven AI Development Platform
+# OpenSpec — Spec-Driven Framework for Vault Smart Contracts
 
-OpenSpec is a framework that connects your project management tool (Jira),
-your codebase, and your AI agent (Copilot, Claude Code, Cursor, etc.) into
-a single coherent workflow — driven by specs and standards, not by improvisation.
+OpenSpec connects your project management tool (Jira), your codebase, and your
+AI agent (Copilot, Claude Code, Cursor, …) into a single spec-driven workflow
+for building **Thought Machine Vault Smart Contracts**.
+
+Built by John Aragón as the MVP for the **Accelerathon GFT × Thought Machine**.
 
 ---
 
 ## The Problem
 
-Modern development teams using AI assistants face a recurring gap: the AI knows
-how to code, but it doesn't know *your* project. It doesn't know your architecture,
-your conventions, your Jira tickets, or your stack. Every prompt has to re-explain
-context that already exists somewhere — scattered across Jira, README files,
-and tribal knowledge.
+An AI assistant knows how to write Python, but it doesn't know that Vault runs a
+**restricted Python sandbox** — no stdlib, no `print`, `Decimal` only for money,
+`ZoneInfo` not `timezone.utc`, `Rejection` not `raise`, `update_permission` required
+on every instance parameter. Every prompt has to re-explain the Contracts Language
+API 4.0, the sandbox rules, and the deploy schema of the shared labs environment.
 
-The result: AI output that's generic, inconsistent, and requires heavy review
-and rework before it fits your codebase.
+The result: contract code that lints clean as Python but is rejected at load time
+or at deploy time.
 
 ---
 
 ## The Solution
 
-OpenSpec acts as the bridge. It stores your project's architectural decisions,
-stack conventions, and quality standards as structured spec files. A lightweight
-CLI reads those specs, fetches context from Jira, and builds a complete,
-context-rich prompt — then delivers it to whatever AI agent your team uses.
+OpenSpec stores the Vault stack's rules — API 4.0 gotchas, sandbox restrictions,
+Core API deploy schema, project conventions — as structured spec files. A
+lightweight CLI reads those specs, fetches the ticket from Jira, and builds a
+complete, context-rich prompt, then delivers it to whatever AI agent your team uses.
 
 ```
 Jira Ticket
     +
-Project Specs (architecture, standards, conventions)
-    +
-Active Stack (Java, Python, Node, Go, Angular, React)
+Vault specs (sandbox rules, API 4.0 changes, Core API deploy findings)
     +
 Active AI Agent (Copilot, Claude Code, Cursor, Aider)
     ↓
 One CLI command
     ↓
-Context-rich prompt → AI generates plan / implementation / review
+Context-rich prompt → AI generates plan / contract / review
+    ↓
+os-vault-lint (8 enforced rules) + pytest ≥ 90% coverage
 ```
 
 ---
@@ -45,37 +47,27 @@ Context-rich prompt → AI generates plan / implementation / review
 ## Core Concepts
 
 ### Spec-Driven Development
-All architectural decisions live in `ai-specs/specs/`. Agents read these
-before generating any output. The AI always works within your conventions —
-not against them.
+The Vault stack's knowledge lives in `ai-specs/`:
+`.agents/stacks/vault-smart-contracts.md` (role + API 4.0 rules),
+`specs/stacks/vault-smart-contracts-standards.mdc` (enforced standards), and
+`specs/stacks/vault-core-api-gotchas.md` (Core API deploy/account/balances findings).
+Agents read these before generating any output.
 
-### Multi-Stack Support
-One repo can support multiple technology stacks. Switch between them with
-`os-stack <name>`. The active stack determines which agent file, standards,
-and tooling commands are loaded.
+### Enforced sandbox linting
+`os-vault-lint` runs AST static analysis on `contracts/*.py` before any test and
+fails the build on a sandbox violation — see [Sandbox restrictions](#sandbox-restrictions).
 
 ### Multi-Agent Support
-Works with any AI agent. Switch between them with `os-agent <name>`.
-Clipboard agents (Copilot, Cursor, Windsurf) copy prompts for manual paste.
-CLI agents (Claude Code, Aider) send prompts automatically via terminal.
+Switch agents with `os-agent <name>`. Clipboard agents (Copilot, Cursor, Windsurf)
+copy the prompt for manual paste; CLI agents (Claude Code, Aider) run it directly.
 
 ### Jira Integration
-Every command that generates a prompt starts by fetching the real ticket
-from Jira — title, description, status, assignee. No copy-pasting context.
+Every command that generates a prompt starts by fetching the real ticket from Jira —
+title, description, status, assignee. No copy-pasting context.
 
----
-
-## Supported Stacks
-
-| Stack | Technologies |
-|---|---|
-| `java-spring` | Java 17, Spring Boot, Spring Data JPA, Flyway, JUnit 5 |
-| `python-fastapi` | Python 3.12, FastAPI, SQLAlchemy, Alembic, pytest |
-| `node-express` | Node.js 20, Express, TypeScript, Prisma, Jest |
-| `go-gin` | Go 1.22, Gin, GORM, golang-migrate, testify |
-| `frontend-react` | React 18, Vite, TypeScript, TanStack Query, Vitest |
-| `frontend-angular` | Angular 17, TypeScript, NgRx, Jest |
-| `vault-smart-contracts` | Thought Machine Vault, Contracts Language API 4.0, pytest |
+### Single stack, extensible shape
+`openspec/config.yaml` keeps a stack registry so another stack could be added later,
+but this repo ships only `vault-smart-contracts`.
 
 ---
 
@@ -97,8 +89,9 @@ from Jira — title, description, status, assignee. No copy-pasting context.
 
 | Command | What it does |
 |---|---|
-| `os-stack [--list\|<name>]` | List or switch active tech stack |
+| `os-stack [--list\|<name>]` | List or switch active stack (only `vault-smart-contracts` today) |
 | `os-agent [--list\|<name>]` | List or switch active AI agent |
+| `os-language [--list\|<code>]` | Output language for plans, Jira, commits and PRs |
 
 ### Jira
 
@@ -117,7 +110,7 @@ from Jira — title, description, status, assignee. No copy-pasting context.
 |---|---|
 | `os-plan <KAN-XX>` | Generate an implementation plan from a Jira ticket |
 | `os-develop <KAN-XX>` | Create feature branch + implementation prompt |
-| `os-commit <KAN-XX>` | Commit, push and open PR → develop |
+| `os-commit <KAN-XX>` | Commit, push and open PR → develop (never straight to develop/main) |
 | `os-review <PR>` | Generate a structured AI code review for a PR |
 | `os-review-apply <PR>` | Publish the review to GitHub and apply verdict |
 | `os-review-fix <PR>` | Auto-fix REQUEST CHANGES feedback, re-review and re-publish |
@@ -126,12 +119,15 @@ from Jira — title, description, status, assignee. No copy-pasting context.
 
 | Command | What it does |
 |---|---|
-| `os-vault-lint` | Static analysis of `contracts/*.py` against Vault sandbox restrictions |
-| `os-vault-test` | Run Vault contract tests (runs `os-vault-lint` first) |
-| `os-vault-simulate` | Simulate a contract over a date range |
+| `os-vault-lint` | AST static analysis of `contracts/*.py` against the Vault sandbox |
+| `os-vault-test [--coverage]` | Run contract tests (runs `os-vault-lint` first) |
+| `os-vault-simulate` | Simulate a contract over a date range (streaming NDJSON) |
 | `os-vault-deploy` | Deploy a contract as a new product version |
 | `os-vault-account` | Open a Vault account for a product version |
 | `os-vault-balances` | Fetch live balances for a Vault account |
+| `os-vault-customer` | Create a customer in the sandbox |
+| `os-vault-products` | List product versions (`--mine` by default in the shared sandbox) |
+| `os-vault-posting` | Send a posting instruction batch |
 
 ---
 
@@ -140,29 +136,32 @@ from Jira — title, description, status, assignee. No copy-pasting context.
 ```
 open-spec/
 ├── .openspec-cli/           # CLI commands and libraries
-│   ├── commands/            # Executable commands (os-plan, os-commit, os-vault-*, etc.)
+│   ├── commands/            # Executable commands (os-plan, os-commit, os-vault-*, …)
 │   ├── lib/                 # Shared shell and Python helpers
 │   │   ├── vault_lint.py    # Vault sandbox restriction linter (AST-based)
-│   │   ├── colors.sh        # Terminal colour helpers
-│   │   └── config.sh        # Stack + env config loader
+│   │   ├── config.sh        # Stack + env config loader
+│   │   └── vault_*.py       # Core API payload builders / result printers
 │   └── install.sh           # Global installer
 ├── ai-specs/
-│   ├── .agents/
-│   │   └── stacks/          # Stack-specific agent files (role + conventions)
-│   ├── .commands/           # Prompt templates for each workflow step
-│   ├── changes/             # Generated implementation plans (per ticket)
+│   ├── .agents/stacks/
+│   │   └── vault-smart-contracts.md      # Agent: role + API 4.0 rules
+│   ├── .commands/                        # Prompt templates (plan/develop/review/enrich)
+│   ├── changes/
+│   │   ├── planes/KAN-XX/                # Generated implementation plans
+│   │   └── enriquecimientos/KAN-XX/      # Ticket enrichments
 │   └── specs/
-│       ├── stacks/          # Stack-specific standards files
+│       ├── stacks/
+│       │   ├── vault-smart-contracts-standards.mdc
+│       │   └── vault-core-api-gotchas.md
 │       ├── base-standards.mdc
 │       └── documentation-standards.mdc
 ├── contracts/               # Vault Smart Contract source files (*.py)
 ├── contracts_sdk/           # Thought Machine contracts_api SDK (local install)
-├── openspec/
-│   └── config.yaml          # Active stack, active agent, stack registry
-├── tests/                   # Test suite
+├── openspec/config.yaml     # Active stack, active agent, language
+├── tests/                   # Contract test suite + vault_lint tests
 ├── pytest.ini               # pytest config (testpaths, pythonpath)
 ├── .env.example             # Environment variable template
-└── README.md                # This file
+└── .github/workflows/ci.yml # CI: lint + lint tests + contract tests
 ```
 
 ---
@@ -179,42 +178,25 @@ cp .env.example .env
 # Edit .env: JIRA_BASE_URL, JIRA_EMAIL, JIRA_TOKEN
 gh auth login
 
-# 3. Select your stack and agent
-os-stack --list
-os-stack python-fastapi
-os-agent --list
-os-agent copilot
-
-# 4. Start with a ticket
-os-enrich KAN-6          # enrich ticket with technical detail
-os-plan KAN-6            # generate implementation plan
-os-develop KAN-6         # create branch + implementation
-os-commit KAN-6          # commit + PR
-os-review 1              # AI code review
-os-review-apply 1        # publish review to GitHub
-```
-
-On Windows, run these commands from Git Bash. PowerShell does not provide the
-`sh` command by default.
-
-### Vault Smart Contracts quick start
-
-```bash
-# Switch to the Vault stack
-os-stack vault-smart-contracts
-
-# Install the local contracts_api SDK
+# 3. Install the local contracts_api SDK
 cd contracts_sdk/contracts_sdk && pip install . && cd ../..
+pip install -r requirements.txt
 
-# Validate a contract against Vault sandbox restrictions
-os-vault-lint contracts/savings_product.py
+# 4. Select the stack and your agent
+os-stack vault-smart-contracts
+os-agent claude-code            # or copilot / cursor / windsurf / aider
 
-# Run tests (lint runs automatically first)
-os-vault-test
-
-# Run tests with coverage report
-os-vault-test --coverage
+# 5. Work a ticket
+os-enrich KAN-15                 # enrich ticket with hooks + params
+os-enrich-apply KAN-15
+os-plan KAN-15                   # implementation plan → ai-specs/changes/planes/
+os-develop KAN-15               # feature branch + contract scaffold
+os-vault-test --coverage        # lint + pytest ≥ 90% before PR
+os-commit KAN-15                # commit + PR → develop
+os-review 1 && os-review-apply 1
 ```
+
+On Windows, run these from Git Bash — PowerShell has no `sh` by default.
 
 See [`.openspec-cli/README.md`](.openspec-cli/README.md) for full command
 documentation and troubleshooting.
@@ -223,83 +205,95 @@ documentation and troubleshooting.
 
 ## Vault Smart Contracts
 
-When the `vault-smart-contracts` stack is active, OpenSpec manages Thought Machine
-Vault contracts written in Python using the Contracts Language API 4.0.
+Contracts are Python written against the **Contracts Language API 4.0**, verified
+against the locally-installed `contracts_api` SDK.
 
 ### Sandbox restrictions
 
 Vault executes contracts in a sandboxed Python environment. `os-vault-lint` performs
-static analysis before any test runs and reports violations with file and line numbers:
+AST static analysis before any test runs and reports violations with file and line:
 
 ```
 contracts/foo.py:12 [FORBIDDEN_IMPORT] import 'os' is not allowed
-contracts/foo.py:34 [FORBIDDEN_CALL] call to 'eval' is not allowed in contracts
+contracts/foo.py:34 [INSTANCE_UPDATE_PERMISSION] INSTANCE parameter 'denomination' must set update_permission=...
 ```
 
 | Rule | Trigger |
 |------|---------|
 | `FORBIDDEN_IMPORT` | Banned stdlib module (`os`, `sys`, `json`, `re`, `datetime`, …) |
-| `UNKNOWN_IMPORT` | Any import not from `contracts_api` or `decimal` |
+| `UNKNOWN_IMPORT` | Any import not from `contracts_api`, `decimal` or `zoneinfo` |
 | `FORBIDDEN_CALL` | Bare call to `eval`, `exec`, `open`, `print`, `getattr`, `type`, … |
-| `EXCEPTION_CHAINING` | `raise X from Y` |
+| `FLOAT_USED` | `float()` call or float literal — use `Decimal` |
+| `TIMEZONE_UTC` | `timezone.utc` — use `ZoneInfo("UTC")` |
+| `CLIENT_TRANSACTION_ID` | `client_transaction_id=` — use `instruction_details` |
+| `PHASE_ON_BALANCE` | `.phase` read from a `Balance` value instead of the `BalanceCoordinate` key |
 | `MUTABLE_GLOBAL` | Module-level `list`/`dict`/`set` not in allowed contract metadata |
+| `EXCEPTION_CHAINING` | `raise X from Y` |
+| `INSTANCE_UPDATE_PERMISSION` | `Parameter(level=INSTANCE)` without `update_permission` |
+| `DERIVED_UPDATE_PERMISSION` | `update_permission` on a `derived=True` / TEMPLATE parameter |
 
-### Contract tooling commands
-
-```bash
-os-vault-lint                          # lint contracts/ (exit 0 = clean)
-os-vault-test                          # lint then pytest
-os-vault-test --coverage               # lint then pytest with HTML coverage
-os-vault-simulate contracts/foo.py \
-    "2024-01-01T00:00:00Z" \
-    "2024-04-01T00:00:00Z" \
-    '{"interest_rate": "0.05"}'        # simulate over a date range
-os-vault-deploy contracts/foo.py \
-    <product_id> "<Display Name>"      # deploy product version
-os-vault-account <product_version_id> \
-    <customer_id>                      # open account
-os-vault-balances <account_id>         # fetch live balances
-```
+The displayed checklist covers **8 rules**; a clean run prints `✔ 8/8 Vault rules — CLEAN`.
 
 ### Contracts
 
 | Contract | Description | Tests |
 | --- | --- | --- |
-| `contracts/savings_product.py` | Savings account with monthly interest accrual | 18 ✅ |
-| `contracts/current_account.py` | Current account with configurable overdraft | 20 ✅ |
-| `contracts/fixed_term_deposit.py` | Fixed-term deposit: daily accrual, maturity disbursement, early closure with penalty | 31 ✅ |
+| `contracts/savings_product.py` | Basic savings account with monthly interest accrual | 23 ✅ |
+| `contracts/current_account.py` | Current account with authorized overdraft limit | 23 ✅ |
+| `contracts/fixed_term_deposit.py` | Daily accrual, maturity disbursement, early closure with penalty | 34 ✅ |
+| `contracts/personal_loan.py` | Amortising loan, monthly repayments, prepayment penalty | 23 ✅ |
+| `contracts/cuenta_joven.py` | Youth account: daily withdrawal limit + bonus interest rate | 32 ✅ |
 
 ### CI integration
 
-The GitHub Actions workflow runs three steps in order for every push:
+The GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push/PR to
+`main` / `master` / `develop`:
 
 1. **Vault lint** — `python .openspec-cli/lib/vault_lint.py contracts/`
 2. **vault_lint unit tests** — `pytest tests/test_vault_lint.py --cov=vault_lint --cov-fail-under=90`
-3. **Smart Contract tests** — `pytest tests/test_savings_product.py tests/test_current_account.py tests/test_fixed_term_deposit.py --cov=contracts --cov-fail-under=90`
+3. **Contract-test guardrail** — `python .openspec-cli/lib/check_contract_tests.py`
+   (every `contracts/*.py` must have a matching `tests/test_*.py`)
+4. **Smart Contract tests** — `pytest tests/ --ignore=tests/test_vault_lint.py --cov=contracts --cov-fail-under=90`
+
+---
+
+## Vault sandbox — the rules that bite
+
+Full detail in `ai-specs/.agents/stacks/vault-smart-contracts.md`. The essentials:
+
+| Area | Rule |
+|---|---|
+| Money | `Decimal` only, never `float` |
+| Datetime | `ZoneInfo("UTC")`, never `timezone.utc`; get it from `hook_arguments.effective_datetime` |
+| Balances | phase is on `BalanceCoordinate` (key), not on `Balance` (value) |
+| Rejections | `return …HookResult(rejection=Rejection(...))`, never `raise` |
+| Instructions | no `client_transaction_id` — use `instruction_details` |
+| Parameters | every INSTANCE param needs `update_permission`; DERIVED/TEMPLATE never do |
+| Derived params | `Parameter(derived=True)` inside `parameters`, not `DerivedParameter` |
+| Deploy | own `product_id` prefix (`openspec_…`), bump `version` per deploy, `X-Auth-Token` header |
 
 ---
 
 ## Architecture Principles
 
-OpenSpec enforces these principles across all stacks:
-
-- **Domain-Driven Design (DDD)** — Domain, Application, Presentation layers
-- **Test-Driven Development (TDD)** — tests before implementation, always
-- **90% coverage threshold** — enforced per stack
+- **Test-Driven Development** — tests before implementation, always
+- **90% coverage threshold** — enforced by `os-vault-test --coverage` and CI
 - **English only** — all code, comments, docs, and commits
 - **Conventional commits** — `feat`, `fix`, `test`, `docs`, `chore`
 - **No secrets in code** — environment variables only
+- **Never commit straight to `develop`/`main`** — `os-commit` always branches
 
 ---
 
 ## Contributing
 
 1. Pick a ticket from Jira
-2. Run `os-enrich <TICKET-ID>` to add technical detail
-3. Run `os-plan <TICKET-ID>` to generate the implementation plan
-4. Run `os-develop <TICKET-ID>` to implement
-5. Run `os-commit <TICKET-ID>` to open a PR
-6. Request review — `os-review <PR>` generates an AI code review
+2. `os-enrich <KAN-XX>` → add technical detail, then `os-enrich-apply`
+3. `os-plan <KAN-XX>` → implementation plan
+4. `os-develop <KAN-XX>` → implement the contract + tests
+5. `os-vault-test --coverage` → must be green (≥ 90%)
+6. `os-commit <KAN-XX>` → open a PR to `develop`
+7. `os-review <PR>` → AI code review
 
 ---
 

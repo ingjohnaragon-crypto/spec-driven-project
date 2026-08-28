@@ -1,8 +1,9 @@
 # OpenSpec CLI
 
 Command-line tools that connect **Jira**, your **repository specs**, and **multiple AI agents**
-in a unified spec-driven workflow. Every `os-*` command resolves the active **stack**,
-**agent**, and **language** from `openspec/config.yaml` before building or delivering a prompt.
+in a unified spec-driven workflow for **Thought Machine Vault Smart Contracts**. Every `os-*`
+command resolves the active **stack**, **agent**, and **language** from `openspec/config.yaml`
+before building or delivering a prompt.
 
 ---
 
@@ -31,20 +32,15 @@ then save the AI output to the working files under `.openspec-cli/`.
 
 **CLI agents** — `os-develop` and `os-review-fix` run autonomously (code changes in the repo).
 
-### Supported stacks
+### Stack
 
 | Stack | Use case |
 |---|---|
-| `vault-smart-contracts` | Thought Machine Vault API 4.0 (this repo) |
-| `python-fastapi` | Python 3.12 + FastAPI |
-| `java-spring` | Java 17 + Spring Boot |
-| `node-express` | Node.js + Express |
-| `go-gin` | Go + Gin |
-| `frontend-react` | React + Vite |
-| `frontend-angular` | Angular |
+| `vault-smart-contracts` | Thought Machine Vault API 4.0 — the only shipped stack |
 
-Vault stack auto-selects `plan-vault-contract.md`, `develop-vault-contract.md`, and
-`review-vault-pr.md` instead of the generic REST templates.
+`config.yaml` keeps the registry shape so another stack could be added later.
+The Vault stack uses `plan-vault-contract.md`, `develop-vault-contract.md`, and
+`review-vault-pr.md` as its prompt templates.
 
 ---
 
