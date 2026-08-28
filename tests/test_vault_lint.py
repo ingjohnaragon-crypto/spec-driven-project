@@ -250,6 +250,82 @@ def test_should_allow_zoneinfo_import(tmp_path: Path) -> None:
     assert violations == []
 
 
+# ── Parameter update_permission (Vault deploy schema) ─────────
+
+
+def test_should_fail_when_instance_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='denomination',\n"
+        "    shape=DenominationShape(),\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    default_value='GBP',\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "INSTANCE_UPDATE_PERMISSION" for v in violations)
+    assert any("denomination" in v.message for v in violations)
+
+
+def test_should_pass_when_instance_parameter_sets_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='denomination',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    update_permission=ParameterUpdatePermission.USER_EDITABLE,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_pass_when_template_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='interest_rate',\n"
+        "    level=ParameterLevel.TEMPLATE,\n"
+        "    default_value=Decimal('0.05'),\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_pass_when_derived_instance_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='accrued_interest',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    derived=True,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_fail_when_derived_parameter_sets_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='accrued_interest',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    derived=True,\n"
+        "    update_permission=ParameterUpdatePermission.USER_EDITABLE,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "DERIVED_UPDATE_PERMISSION" for v in violations)
+
+
 # ── main() exit codes ─────────────────────────────────────────
 
 
@@ -260,7 +336,7 @@ def test_main_should_return_0_when_no_violations(tmp_path: Path, capsys) -> None
     out = capsys.readouterr().out
     assert "Checking Vault sandbox restrictions..." in out
     assert "✔ No stdlib imports detected" in out
-    assert "✔ 7/7 Vault rules — CLEAN" in out
+    assert "✔ 8/8 Vault rules — CLEAN" in out
 
 
 def test_main_should_return_1_when_violations_found(tmp_path: Path, capsys) -> None:
