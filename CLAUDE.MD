@@ -42,11 +42,10 @@ open-spec/
 │   │   ├── config.sh
 │   │   ├── agent.sh
 │   │   ├── jira.sh                   # incluye os_jira_create_ticket, os_jira_list_tickets
-│   │   ├── vault.sh
 │   │   ├── parse_config.py
 │   │   ├── parse_agent.py
 │   │   ├── parse_stack.py
-│   │   ├── vault_simulate_payload.py
+│   │   ├── vault_simulate.py         # POST /v1/contracts:simulate (streaming NDJSON)
 │   │   └── vault_deploy_payload.py
 │   └── commands/                     # 23 comandos os-*
 └── .github/workflows/ci.yml          # CI con contracts_api SDK
