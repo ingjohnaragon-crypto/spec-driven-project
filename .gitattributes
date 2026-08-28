@@ -2,7 +2,7 @@
 * text=auto
 
 # Shell scripts — always LF
-/gradlew text eol=lf
+*.sh text eol=lf
 .openspec-cli/**     text eol=lf
 .openspec-cli/commands/os-* text eol=lf
 
@@ -10,6 +10,5 @@
 *.bat text eol=crlf
 
 # Binary files
-*.jar binary
 *.png binary
 *.jpg binary
