@@ -29,7 +29,7 @@ CONTRACT_ALLOWED_GLOBALS: set[str] = {
     "api", "version", "display_name", "summary", "description",
     "tside", "supported_denominations", "parameters",
     "event_types", "event_types_groups",
-    "balance_observation_fetchers",
+    "data_fetchers",  # API 4.0 metadata name for observation/interval fetchers
     "DEFAULT_ADDRESS", "DEFAULT_ASSET",
 }
 
@@ -48,7 +48,17 @@ DISPLAY_RULES: tuple[tuple[str, frozenset[str]], ...] = (
         "INSTANCE params declare update_permission",
         frozenset({"INSTANCE_UPDATE_PERMISSION", "DERIVED_UPDATE_PERMISSION"}),
     ),
+    (
+        "Hooks declare their data requirements",
+        frozenset({"MISSING_PARAMETERS_REQUIREMENT", "MISSING_BALANCES_FETCHER"}),
+    ),
 )
+
+# vault.<method> calls that need a matching @requires / @fetch_account_data
+_PARAM_READERS: frozenset[str] = frozenset(
+    {"get_parameter_timeseries", "get_parameters_observation"}
+)
+_BALANCE_OBS_READERS: frozenset[str] = frozenset({"get_balances_observation"})
 
 _GREEN = "\033[0;32m"
 _RED = "\033[0;31m"
@@ -267,12 +277,102 @@ class VaultLintVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
+def _vault_methods_called(node: ast.AST) -> set[str]:
+    """Names of `<something>.<method>()` attribute calls inside node."""
+    methods: set[str] = set()
+    for sub in ast.walk(node):
+        if (
+            isinstance(sub, ast.Call)
+            and isinstance(sub.func, ast.Attribute)
+        ):
+            methods.add(sub.func.attr)
+    return methods
+
+
+def _local_funcs_called(node: ast.AST, local_names: set[str]) -> set[str]:
+    """Names of module-local functions invoked inside node."""
+    called: set[str] = set()
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
+            if sub.func.id in local_names:
+                called.add(sub.func.id)
+    return called
+
+
+def _decorator_flags(func: ast.FunctionDef) -> tuple[bool, bool]:
+    """(has @requires(parameters=True), has @fetch_account_data(balances=...))."""
+    req_params = fetch_balances = False
+    for dec in func.decorator_list:
+        if not isinstance(dec, ast.Call) or not isinstance(dec.func, ast.Name):
+            continue
+        kw = {k.arg: k.value for k in dec.keywords}
+        if dec.func.id == "requires":
+            val = kw.get("parameters")
+            if isinstance(val, ast.Constant) and val.value is True:
+                req_params = True
+            if "balances" in kw:  # @requires(balances="…") also satisfies balances
+                fetch_balances = True
+        elif dec.func.id == "fetch_account_data" and "balances" in kw:
+            fetch_balances = True
+    return req_params, fetch_balances
+
+
+def check_hook_requirements(tree: ast.Module, filename: str) -> list[Violation]:
+    """A hook that (transitively) reads parameters/balances must declare it via
+    @requires / @fetch_account_data. Mocked unit tests never catch a missing
+    requirement; the real Vault (and os-vault-simulate) rejects it at runtime.
+    """
+    funcs = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    local_names = set(funcs)
+
+    reads_params: dict[str, bool] = {}
+    reads_balances: dict[str, bool] = {}
+    for name, fn in funcs.items():
+        methods = _vault_methods_called(fn)
+        reads_params[name] = bool(methods & _PARAM_READERS)
+        reads_balances[name] = bool(methods & _BALANCE_OBS_READERS)
+
+    # Propagate through module-local call edges until stable (handles
+    # scheduled_event_hook -> _handle_x -> _param helper chains).
+    for _ in range(len(funcs) + 1):
+        changed = False
+        for name, fn in funcs.items():
+            for callee in _local_funcs_called(fn, local_names):
+                if reads_params.get(callee) and not reads_params[name]:
+                    reads_params[name] = True
+                    changed = True
+                if reads_balances.get(callee) and not reads_balances[name]:
+                    reads_balances[name] = True
+                    changed = True
+        if not changed:
+            break
+
+    violations: list[Violation] = []
+    for name, fn in funcs.items():
+        if not name.endswith("_hook"):
+            continue
+        has_req_params, has_fetch_balances = _decorator_flags(fn)
+        if reads_params[name] and not has_req_params:
+            violations.append(Violation(
+                filename, fn.lineno, "MISSING_PARAMETERS_REQUIREMENT",
+                f"hook {name!r} reads parameters but has no "
+                f"@requires(parameters=True)",
+            ))
+        if reads_balances[name] and not has_fetch_balances:
+            violations.append(Violation(
+                filename, fn.lineno, "MISSING_BALANCES_FETCHER",
+                f"hook {name!r} calls get_balances_observation() but has no "
+                f"@fetch_account_data(balances=[...])",
+            ))
+    return violations
+
+
 def lint_file(path: Path) -> list[Violation]:
     source = path.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(path))
     visitor = VaultLintVisitor(str(path))
     visitor.visit(tree)
-    return visitor.violations
+    return visitor.violations + check_hook_requirements(tree, str(path))
 
 
 def lint_directory(directory: Path) -> list[Violation]:

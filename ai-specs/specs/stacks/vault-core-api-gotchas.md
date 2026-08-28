@@ -93,8 +93,65 @@ Soporta:
 ## 3. `/v1/contracts:simulate` es streaming NDJSON
 
 - `Content-Type: application/x-ndjson`, `Transfer-Encoding: chunked` — no es un JSON de una sola vez. Hay que consumirlo línea por línea (`requests(stream=True)` + `iter_lines()` en Python), no con `curl -o` ni con un GET/POST bloqueante normal.
-- La inspección TLS corporativa (Zscaler/similar) puede romper este tipo de respuesta streaming — síntoma: `HTTP 200` con headers correctos pero cuerpo vacío (con `curl` y con `requests` normal) o timeout (con Postman).
-- Confirmado reproducible con múltiples herramientas — no es bug de cliente, requiere excepción de red de IT.
+- La inspección TLS corporativa (Zscaler/similar) rompe el streaming — síntoma: `HTTP 200` con headers correctos pero cuerpo vacío (`curl -o`, `requests` con lectura buffered) o timeout (Postman).
+- **Con la VPN corporativa activa el streaming funciona** (sesión 2026-08-28): el host resuelve a IPs internas `172.16.0.x`, el TLS handshake completa y `requests(stream=True)` recibe las líneas NDJSON reales. Sin VPN, el `connect()` a `core-api.tm.blx-demo.com:443` hace timeout (bloqueo de firewall al destino, no solo inspección TLS).
+
+## 3.1 Schema de `/v1/contracts:simulate` para un contrato nuevo (verificado)
+
+Para que la simulación ejecute hooks de verdad hace falta **crear la cuenta dentro de la simulación** — `instructions: []` registra el contrato pero nunca corre nada.
+
+```jsonc
+{
+  "start_timestamp": "2024-01-01T00:00:00Z",
+  "end_timestamp":   "2024-04-01T00:00:00Z",
+  "smart_contracts": [{
+    "code": "<contenido del .py>",
+    "smart_contract_version_id": "1",
+    "smart_contract_param_vals": { "interest_rate": "0.05" }   // TEMPLATE/GLOBAL
+  }],
+  "instructions": [{
+    "timestamp": "2024-01-01T00:00:00Z",
+    "create_account": {
+      "id": "sim-account",
+      "product_version_id": "1",
+      "instance_param_vals": { "denomination": "GBP" }          // TODOS los INSTANCE no-derivados
+    }
+  }]
+}
+```
+
+- **`smart_contract_version_id`** (string entero de 64 bits, ej. `"1"`) es obligatorio; sin él: `smart contract version "" is invalid`.
+- **Parámetros TEMPLATE/GLOBAL no-opcionales**: obligatorios en `smart_contract_param_vals` aunque el `.py` tenga `default_value` (`"no parameter value provided for non-optional smart contract parameter"`).
+- **Parámetros TEMPLATE opcionales** (`OptionalShape`): mejor omitirlos y dejar que aplique el `default_value` del contrato; reenviar el wrapper `OptionalValue(UnionItemValue("false"))` es frágil.
+- **Parámetros INSTANCE**: van en `create_account.instance_param_vals`, uno por cada `Parameter(level=INSTANCE)` no-derivado.
+- **`DateShape`**: el valor va como `"YYYY-MM-DD"` (fecha pelada). Pasar un datetime `"2024-03-01T00:00:00Z"` provoca **HTTP 500 `INTERNAL` "Something went wrong"** (no un 400) — el server crashea.
+- Respuesta: líneas `{"result": {"timestamp", "logs", "balances", "posting_instruction_batches", ...}}`; una línea de error `{"error": {...}, "details": [{"violations": [{"violation_type": "EXCEPTION_RAISED_BY_SMART_CONTRACT", "metadata": {"exception_type", "exception_args", "stack_trace"}}]}]}` si un hook lanza.
+
+## 3.2 API 4.0: todo hook debe declarar sus data requirements
+
+Descubierto al pasar los 5 contratos por `os-vault-simulate`: 4 fallaban con
+`InvalidSmartContractError: Timeseries '<param>' not found`. En Contracts Language API 4.0 un hook que lee parámetros o balances **debe declarar la dependencia**; con `vault` mockeado los 183 tests unitarios nunca lo detectan.
+
+```python
+from contracts_api import BalancesObservationFetcher, DefinedDateTime, fetch_account_data, requires
+
+data_fetchers = [                      # nombre de metadata API 4.0 (NO balance_observation_fetchers)
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
+
+@requires(parameters=True)                                    # get_parameter_timeseries()
+@fetch_account_data(balances=["live_balances"])               # get_balances_observation()
+def pre_posting_hook(vault, hook_arguments): ...
+
+@requires(event_type="ACCRUE_INTEREST", parameters=True)      # scheduled: uno por event_type
+@fetch_account_data(event_type="ACCRUE_INTEREST", balances=["live_balances"])
+def scheduled_event_hook(vault, hook_arguments): ...
+```
+
+- `activation_hook` y `derived_parameter_hook` que leen parámetros también necesitan `@requires(parameters=True)`.
+- `scheduled_event_hook` con N event_types y lectura incondicional de datos → N decoradores `@requires` + N `@fetch_account_data`.
+- La dependencia es la unión de lo que el hook y sus helpers (`_handle_x(vault)`, `_param(vault, ...)`) tocan.
+- `vault_lint.py` lo verifica: reglas `MISSING_PARAMETERS_REQUIREMENT` / `MISSING_BALANCES_FETCHER`.
 
 ## 4. Endpoints que SÍ funcionan pese al problema de streaming
 
