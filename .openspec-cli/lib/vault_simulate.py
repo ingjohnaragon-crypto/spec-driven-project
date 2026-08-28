@@ -43,11 +43,12 @@ _GREEN, _RED, _CYAN, _YELLOW, _BOLD, _RESET = (
 
 
 def _configure_stdout() -> None:
-    """Avoid UnicodeEncodeError on Windows consoles (cp1252) for ✔/✖/⏱."""
+    """UTF-8 for ✔/✖/⏱, and line buffering so the NDJSON stream prints as it
+    arrives (not in one block) even when stdout is piped."""
     for stream in (sys.stdout, sys.stderr):
         try:
-            stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except (AttributeError, OSError):
+            stream.reconfigure(encoding="utf-8", line_buffering=True)  # type: ignore[union-attr]
+        except (AttributeError, OSError, ValueError):
             pass
 
 
@@ -266,8 +267,12 @@ def main(argv: list[str]) -> int:
         print(_c(_RED, f"✖ request failed: {exc}"))
         return 1
 
-    print(f"HTTP {resp.status_code}  {resp.headers.get('content-type', '')}")
-    print(_c(_CYAN, "────────────────────────────────────────────"))
+    hdr_ct = resp.headers.get("content-type", "")
+    print(f"HTTP {resp.status_code}  {hdr_ct}  ({time.time() - t0:.1f}s)")
+    if "ndjson" in hdr_ct:
+        print(_c(_CYAN, "──── streaming (line by line, as Vault replays) ────"))
+    else:
+        print(_c(_CYAN, "────────────────────────────────────────────"))
 
     n_lines = 0
     failed = False
@@ -278,18 +283,19 @@ def main(argv: list[str]) -> int:
         try:
             obj = json.loads(raw)
         except json.JSONDecodeError:
-            print(f"  (unparsed) {raw[:300]!r}")
+            print(f"  (unparsed) {raw[:300]!r}", flush=True)
             continue
         if isinstance(obj, list):  # bare log array
             for log in obj:
-                print(f"  {log}")
+                print(f"  {log}", flush=True)
         elif "result" in obj:
             _render_result(obj["result"])
         elif obj.get("error") or obj.get("code") or obj.get("http_code"):
             failed = True
             _render_error(obj)
         else:
-            print(f"  {json.dumps(obj)[:400]}")
+            print(f"  {json.dumps(obj)[:400]}", flush=True)
+        sys.stdout.flush()
 
     elapsed = time.time() - t0
     print(_c(_CYAN, "────────────────────────────────────────────"))
