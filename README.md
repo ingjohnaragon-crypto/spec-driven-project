@@ -154,14 +154,11 @@ open-spec/
 │   └── specs/
 │       ├── stacks/          # Stack-specific standards files
 │       ├── base-standards.mdc
-│       ├── api-spec.yml
-│       ├── data-model.md
 │       └── documentation-standards.mdc
 ├── contracts/               # Vault Smart Contract source files (*.py)
 ├── contracts_sdk/           # Thought Machine contracts_api SDK (local install)
 ├── openspec/
 │   └── config.yaml          # Active stack, active agent, stack registry
-├── src/                     # Application source code
 ├── tests/                   # Test suite
 ├── pytest.ini               # pytest config (testpaths, pythonpath)
 ├── .env.example             # Environment variable template

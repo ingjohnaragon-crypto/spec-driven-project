@@ -1,62 +1,13 @@
-HELP.md
-.gradle
-build/
-!gradle/wrapper/gradle-wrapper.jar
-!**/src/main/**/build/
-!**/src/test/**/build/
+# OS
+.DS_Store
+Thumbs.db
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
-
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-### VS Code ###
-.vscode/
-
-### OpenAPI ###
-openapi.yaml
-openapi.json
-
-### Swagger ###
-swagger.yaml
-swagger.json
-
-# Java / Gradle
-**/build/
-**/.gradle/
-*.class
+# Env / secrets
+.env
 
 # IDE
 .idea/
 .vscode/
-
-# OS
-.DS_Store
-Thumbs.db
-.env
 
 # Python
 __pycache__/
@@ -65,15 +16,18 @@ __pycache__/
 *.pyd
 .coverage
 htmlcov/
+coverage.xml
 .pytest_cache/
 *.egg-info/
 dist/
+build/
 .venv/
 venv/
 
-# OpenSpec CLI internal state
+# OpenSpec CLI internal state (runtime artifacts, never committed)
 .openspec-cli/.*.applied
 .openspec-cli/.last-prompt.md
+.openspec-cli/.last-simulation.json
 .openspec-cli/.pr-diff.patch
 .openspec-cli/.pr-body.md
 .openspec-cli/.pr-body-from-gh.md
@@ -82,6 +36,7 @@ venv/
 .openspec-cli/.review-publish.md
 .openspec-cli/.enriched-content.md
 .openspec-cli/.fix-prompt.md
+.openspec-cli/.fix-report.md
 .openspec-cli/staged.tmp
 .openspec-cli/.vault-deployed-products.log
 .openspec-cli/.vault-deployed-products.log.bak
