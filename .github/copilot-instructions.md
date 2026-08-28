@@ -102,7 +102,9 @@ The project includes repo-specific rules from the Vault API 4.0 migration. When 
 - `PrePostingHookArguments` requires `client_transactions={}`
 - prefer `vault.get_balances_observation(fetcher_id="live_balances")` over legacy balance time-series APIs
 - every INSTANCE parameter declares `update_permission=ParameterUpdatePermission.USER_EDITABLE`; derived parameters use `Parameter(derived=True)` inside `parameters`, never `DerivedParameter`
+- every hook that reads a parameter or calls `get_balances_observation()` declares it: `@requires(parameters=True)` and/or `@fetch_account_data(balances=["live_balances"])` (one set per `event_type` on `scheduled_event_hook`); the module fetcher list is `data_fetchers`, not `balance_observation_fetchers`. Missing this passes the mocked tests and fails on real Vault.
 - for a real deploy: own `product_id` prefix (`openspec_…`), bump `version` per attempt, auth header `X-Auth-Token` (not `Bearer`). See `ai-specs/specs/stacks/vault-core-api-gotchas.md`.
+- run `os-vault-simulate <contract>` (needs the corporate VPN) before considering a contract done — it executes the hooks against an in-memory Vault.
 
 These are not just style preferences; they are compatibility constraints for the installed SDK.
 

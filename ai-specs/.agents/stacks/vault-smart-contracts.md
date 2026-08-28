@@ -211,7 +211,8 @@ PrePostingHookArguments(
 )
 ```
 
-### 6. get_balances_observation not get_balance_timeseries
+### 6. get_balances_observation not get_balance_timeseries — and declare the fetcher
+
 ```python
 # CORRECT API 4.0
 balances = vault.get_balances_observation(fetcher_id="live_balances").balances
@@ -219,6 +220,11 @@ balances = vault.get_balances_observation(fetcher_id="live_balances").balances
 # WRONG — API 3.x pattern
 balances = vault.get_balance_timeseries().latest()
 ```
+
+Every call to `get_balances_observation()` needs a `BalancesObservationFetcher` in
+the module-level **`data_fetchers`** list (NOT `balance_observation_fetchers` —
+that name is silently ignored) AND the hook decorated with `@fetch_account_data`.
+See rule #11.
 
 ### 7. Derived parameters — `Parameter(derived=True)`, NOT `DerivedParameter`
 
@@ -332,6 +338,42 @@ Parameter(name="denomination", shape=DenominationShape(),
 Note: `default_value` on an INSTANCE parameter only applies to account **migrations**,
 never to normal account creation — the real value is supplied by `os-vault-account`.
 
+### 11. Every hook declares its data requirements (`@requires` / `@fetch_account_data`)
+
+Enforced by `vault_lint.py` (`MISSING_PARAMETERS_REQUIREMENT` / `MISSING_BALANCES_FETCHER`).
+Verified by `os-vault-simulate`. Mocked unit tests do NOT catch a missing requirement —
+the real Vault raises `InvalidSmartContractError: Timeseries '<param>' not found`.
+
+```python
+from contracts_api import (
+    ..., BalancesObservationFetcher, DefinedDateTime, fetch_account_data, requires,
+)
+
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
+
+# reads a parameter  → @requires(parameters=True)
+# calls get_balances_observation() → @fetch_account_data(balances=[...])
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
+def pre_posting_hook(vault, hook_arguments): ...
+
+@requires(parameters=True)
+def activation_hook(vault, hook_arguments): ...          # if it reads parameters
+
+# scheduled_event_hook: one decorator PER event_type it can receive
+@requires(event_type="ACCRUE_INTEREST", parameters=True)
+@fetch_account_data(event_type="ACCRUE_INTEREST", balances=["live_balances"])
+def scheduled_event_hook(vault, hook_arguments): ...
+```
+
+- The requirement is the **union** of what the hook and every helper it calls
+  (`_handle_daily_accrual(vault)`, `_param(vault, name)`, …) touch.
+- Module-level fetcher list is **`data_fetchers`** — `balance_observation_fetchers`
+  is silently ignored.
+- `derived_parameter_hook` that reads params/balances needs the decorators too.
+
 ---
 
 ## Contract template (API 4.0)
@@ -339,8 +381,8 @@ never to normal account creation — the real value is supplied by `os-vault-acc
 ```python
 from contracts_api import (
     ActivationHookArguments, ActivationHookResult,
-    BalanceCoordinate, BalanceDefaultDict,
-    CustomInstruction, DenominationShape, EndOfMonthSchedule,
+    BalanceCoordinate, BalanceDefaultDict, BalancesObservationFetcher,
+    CustomInstruction, DefinedDateTime, DenominationShape, EndOfMonthSchedule,
     NumberShape, Parameter, ParameterLevel, ParameterUpdatePermission,
     Phase, Posting,
     PostingInstructionsDirective, PostPostingHookArguments,
@@ -348,6 +390,7 @@ from contracts_api import (
     Rejection, RejectionReason, ScheduledEvent,
     ScheduledEventHookArguments, ScheduledEventHookResult,
     SmartContractEventType, Tside,
+    fetch_account_data, requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -383,6 +426,10 @@ parameters = [
 
 event_types = []
 event_types_groups = []
+
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 ```
 
 ## Hook signatures (API 4.0)
@@ -392,6 +439,8 @@ def activation_hook(vault, hook_arguments: ActivationHookArguments) -> Activatio
     return ActivationHookResult(scheduled_events_return_value={})
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(vault, hook_arguments: PrePostingHookArguments) -> PrePostingHookResult:
     denomination = vault.get_parameter_timeseries(name="denomination").latest()
     balances     = vault.get_balances_observation(fetcher_id="live_balances").balances
@@ -524,9 +573,14 @@ The Accelerathon labs sandbox is **shared across teams**. Rules learned the hard
 - **Auth header is `X-Auth-Token: <token>`**, plain token — not `Authorization: Bearer`.
   The labs sandbox is not JWT.
 - **`/v1/contracts:simulate` is streaming NDJSON** (`application/x-ndjson`, chunked).
-  Corporate TLS inspection (Zscaler) can silently truncate it — HTTP 200, empty body.
-  `os-vault-simulate` consumes it line by line; `os-vault-deploy` / `-account` /
-  `-balances` are plain JSON and unaffected.
+  Corporate TLS inspection (Zscaler) truncates it (HTTP 200, empty body); the
+  corporate **VPN** makes it work. `os-vault-simulate` streams it with
+  `requests(stream=True)`; `os-vault-deploy` / `-account` / `-balances` are plain JSON.
+- **Simulate a new contract**: the payload must open the account inside the
+  simulation (`instructions[].create_account` with `instance_param_vals` for every
+  non-derived INSTANCE param); TEMPLATE/GLOBAL non-optional params go in
+  `smart_contract_param_vals`. `DateShape` values are `"YYYY-MM-DD"` — a datetime
+  string causes an HTTP 500. `os-vault-simulate` builds all of this from the contract.
 - **Balances**: use `/v1/balances/live?account_ids=<id>&page_size=50` (plural
   `account_ids`); `/v2/balances/live` returns 404 in this sandbox.
 
@@ -541,12 +595,13 @@ os-enrich-apply KAN-15
 os-plan KAN-15                    # generates plan in ai-specs/changes/planes/
 os-develop KAN-15                 # creates branch + scaffold
 
-os-vault-test                     # run 18 tests locally with SDK
+os-vault-test                     # vault_lint (9 rules) + pytest with SDK
 os-vault-test --coverage          # coverage ≥ 90% required before PR
 
+os-vault-simulate contracts/<product>.py                 # auto window + params
 os-vault-simulate contracts/<product>.py \
-    "2024-01-01T00:00:00Z" "2024-04-01T00:00:00Z" \
-    '{"interest_rate": "0.05"}'
+    2024-01-01T00:00:00Z 2024-04-01T00:00:00Z \
+    '{"interest_rate": "0.06", "maturity_date": "2024-03-01"}'   # overrides
 os-vault-deploy contracts/<product>.py <product_id> "<display name>"
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
@@ -567,4 +622,8 @@ os-review 1 && os-review-apply 1
 - `instruction_details` carries traceability — no `client_transaction_id`
 - Only `contracts_api`, `decimal` and `zoneinfo` imports allowed in contract code
 - Every INSTANCE parameter declares `update_permission`; DERIVED/TEMPLATE never do
+- Every hook that reads parameters/balances declares `@requires` / `@fetch_account_data`
+- Module fetcher list is `data_fetchers` (not `balance_observation_fetchers`)
 - `product_id` for a real deploy uses an own prefix (`openspec_…`); bump `version` per deploy
+- Run `os-vault-simulate <contract>` before opening the PR — it catches missing
+  data requirements and load-time errors that mocked tests can't

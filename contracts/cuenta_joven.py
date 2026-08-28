@@ -4,7 +4,9 @@ from contracts_api import (
     ActivationHookResult,
     BalanceCoordinate,
     BalanceDefaultDict,
+    BalancesObservationFetcher,
     CustomInstruction,
+    DefinedDateTime,
     DenominationShape,
     EndOfMonthSchedule,
     NumberShape,
@@ -25,6 +27,8 @@ from contracts_api import (
     ScheduledEventHookResult,
     SmartContractEventType,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
@@ -111,6 +115,11 @@ event_types = [
     SmartContractEventType(name=MONTHLY_INTEREST),
 ]
 event_types_groups = []
+
+# API 4.0: hooks that call get_balances_observation() declare the fetcher here.
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 
 
 def _quantize_money(amount: Decimal) -> Decimal:
@@ -243,6 +252,7 @@ def _validate_parameters(
         raise ValueError("Invalid account parameters.")
 
 
+@requires(parameters=True)
 def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
@@ -265,6 +275,8 @@ def activation_hook(
     )
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
@@ -314,6 +326,7 @@ def pre_posting_hook(
     return PrePostingHookResult()
 
 
+@requires(parameters=True)
 def post_posting_hook(
     vault, hook_arguments: PostPostingHookArguments
 ) -> PostPostingHookResult:
@@ -338,6 +351,10 @@ def post_posting_hook(
     )
 
 
+@requires(event_type="DAILY_WITHDRAWAL_RESET", parameters=True)
+@requires(event_type="MONTHLY_INTEREST", parameters=True)
+@fetch_account_data(event_type="DAILY_WITHDRAWAL_RESET", balances=["live_balances"])
+@fetch_account_data(event_type="MONTHLY_INTEREST", balances=["live_balances"])
 def scheduled_event_hook(
     vault, hook_arguments: ScheduledEventHookArguments
 ) -> ScheduledEventHookResult:

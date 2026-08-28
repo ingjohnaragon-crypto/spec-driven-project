@@ -4,6 +4,8 @@ from contracts_api import (
     ActivationHookResult,
     BalanceCoordinate,
     BalanceDefaultDict,
+    BalancesObservationFetcher,
+    DefinedDateTime,
     DenominationShape,
     NumberShape,
     Parameter,
@@ -18,6 +20,8 @@ from contracts_api import (
     ScheduledEventHookArguments,
     ScheduledEventHookResult,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal
 
@@ -61,6 +65,11 @@ parameters = [
 
 event_types = []
 event_types_groups = []
+
+# API 4.0: hooks that call get_balances_observation() declare the fetcher here.
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 
 
 def _get_committed_balance(
@@ -110,6 +119,8 @@ def activation_hook(
     return ActivationHookResult(scheduled_events_return_value={})
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
