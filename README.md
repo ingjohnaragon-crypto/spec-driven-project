@@ -121,7 +121,7 @@ but this repo ships only `vault-smart-contracts`.
 |---|---|
 | `os-vault-lint` | AST static analysis of `contracts/*.py` against the Vault sandbox |
 | `os-vault-test [--coverage]` | Run contract tests (runs `os-vault-lint` first) |
-| `os-vault-simulate` | Simulate a contract over a date range (streaming NDJSON) |
+| `os-vault-simulate` | Simulate a contract over a date range — opens an account in-memory, streams the NDJSON result (needs the VPN) |
 | `os-vault-deploy` | Deploy a contract as a new product version |
 | `os-vault-account` | Open a Vault account for a product version |
 | `os-vault-balances` | Fetch live balances for a Vault account |
@@ -231,8 +231,10 @@ contracts/foo.py:34 [INSTANCE_UPDATE_PERMISSION] INSTANCE parameter 'denominatio
 | `EXCEPTION_CHAINING` | `raise X from Y` |
 | `INSTANCE_UPDATE_PERMISSION` | `Parameter(level=INSTANCE)` without `update_permission` |
 | `DERIVED_UPDATE_PERMISSION` | `update_permission` on a `derived=True` / TEMPLATE parameter |
+| `MISSING_PARAMETERS_REQUIREMENT` | hook reads a parameter without `@requires(parameters=True)` |
+| `MISSING_BALANCES_FETCHER` | hook calls `get_balances_observation()` without `@fetch_account_data(balances=…)` |
 
-The displayed checklist covers **8 rules**; a clean run prints `✔ 8/8 Vault rules — CLEAN`.
+The displayed checklist covers **9 rules**; a clean run prints `✔ 9/9 Vault rules — CLEAN`.
 
 ### Contracts
 
@@ -270,7 +272,12 @@ Full detail in `ai-specs/.agents/stacks/vault-smart-contracts.md`. The essential
 | Instructions | no `client_transaction_id` — use `instruction_details` |
 | Parameters | every INSTANCE param needs `update_permission`; DERIVED/TEMPLATE never do |
 | Derived params | `Parameter(derived=True)` inside `parameters`, not `DerivedParameter` |
+| Hook data | reads a param/balance ⇒ `@requires` / `@fetch_account_data`; fetcher list is `data_fetchers` |
 | Deploy | own `product_id` prefix (`openspec_…`), bump `version` per deploy, `X-Auth-Token` header |
+
+Run `os-vault-simulate <contract>` before a PR — it opens an account inside an
+in-memory Vault, replays the schedules, and catches runtime errors (missing data
+requirements, load-time crashes) that the mocked unit tests cannot.
 
 ---
 

@@ -33,7 +33,7 @@ open-spec/
 │   └── changes/planes|enriquecimientos/KAN-XX/   # planes y enriquecimientos por ticket
 ├── contracts/                        # 5 Smart Contracts (savings, current_account,
 │   │                                #   fixed_term_deposit, personal_loan, cuenta_joven)
-├── tests/                            # 135 tests de contratos + 48 de vault_lint ✅
+├── tests/                            # 135 tests de contratos + 54 de vault_lint ✅
 ├── contracts_sdk/                    # SDK Thought Machine (local)
 │   └── contracts_sdk/                # py -m pip install . desde aquí
 ├── .openspec-cli/
@@ -237,6 +237,16 @@ Parameter(name="denomination", level=ParameterLevel.INSTANCE,
 # ❌ sin update_permission → el DEPLOY falla ("must be specified for parameters at instance level")
 # ❌ update_permission en un param derived=True o TEMPLATE → rechazado
 # vault_lint.py lo verifica: reglas INSTANCE_UPDATE_PERMISSION / DERIVED_UPDATE_PERMISSION
+
+# Todo hook que lee parámetros/balances DEBE declarar el requirement
+from contracts_api import BalancesObservationFetcher, DefinedDateTime, fetch_account_data, requires
+data_fetchers = [BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE)]  # NO balance_observation_fetchers
+@requires(parameters=True)                          # get_parameter_timeseries()
+@fetch_account_data(balances=["live_balances"])     # get_balances_observation()
+def pre_posting_hook(vault, hook_arguments): ...
+# ❌ sin decoradores → InvalidSmartContractError: Timeseries 'x' not found (los tests mockeados NO lo ven)
+# scheduled_event_hook: un @requires + un @fetch_account_data por cada event_type
+# vault_lint.py lo verifica: MISSING_PARAMETERS_REQUIREMENT / MISSING_BALANCES_FETCHER
 ```
 
 ### Deploy al sandbox compartido (hallazgos sesión KAN-12)
@@ -245,7 +255,9 @@ Parameter(name="denomination", level=ParameterLevel.INSTANCE,
 - Subir `version` en el `.py` en cada intento de deploy real
 - Parámetros TEMPLATE/GLOBAL necesitan `value` en el payload; los INSTANCE no (van al crear la cuenta)
 - Header `X-Auth-Token: <token>` (token plano), NO `Authorization: Bearer`
-- `/v1/contracts:simulate` es NDJSON en streaming; balances con `/v1/balances/live?account_ids=...`
+- `/v1/contracts:simulate` es NDJSON en streaming y **funciona con la VPN corporativa activa**
+  (sin VPN el `connect()` al host hace timeout). `os-vault-simulate` abre la cuenta dentro
+  de la simulación; `DateShape` va como `"YYYY-MM-DD"` (un datetime provoca HTTP 500)
 - Detalle completo: `ai-specs/specs/stacks/vault-core-api-gotchas.md`
 
 ---
@@ -274,16 +286,17 @@ VAULT_DEFAULT_DENOMINATION=GBP
 - Repo enfocado 100% en Vault (stacks no-Vault retirados)
 - Integración Jira completa (fetch, create, transition, list, enrich)
 - Integración GitHub (PR, review, merge)
-- `vault_lint.py` — 8 reglas de sandbox, incluida `update_permission` en params INSTANCE
+- `vault_lint.py` — 9 reglas de sandbox (`update_permission` en INSTANCE, data requirements por hook)
 - Vault Core API integrada (simulate, deploy, account, balances, customer, products)
-- 5 contratos con 135 tests verdes + 48 de vault_lint, API 4.0 verificada
-- Hallazgos Core API de la sesión KAN-12 propagados a agente + standards + linter
+- 5 contratos con 135 tests verdes + 54 de vault_lint, API 4.0 verificada
+- Hallazgos Core API (KAN-12 + sesión simulate 2026-08-28) en agente + standards + linter
+- `os-vault-simulate` operativo (streaming NDJSON con VPN); los 5 contratos simulan limpio
 - CI GitHub Actions con contracts_api SDK
 - `os-review-fix` — loop automático de corrección + re-review
 - `os-commit` protege develop/main (siempre crea feature branch)
 
 ### Pendiente ⏳
-- Prueba E2E completa contra Vault Sandbox (bloqueada por inspección TLS corporativa en simulate)
+- Prueba E2E completa contra Vault Sandbox: simulate ✅ (con VPN); falta deploy→account→balances en verde de punta a punta
 - Dashboard de métricas de adopción (Fase 2)
 - Repositorio de specs base GFT reutilizables
 
