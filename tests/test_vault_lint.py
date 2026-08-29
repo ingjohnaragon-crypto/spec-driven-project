@@ -250,6 +250,147 @@ def test_should_allow_zoneinfo_import(tmp_path: Path) -> None:
     assert violations == []
 
 
+# ── Parameter update_permission (Vault deploy schema) ─────────
+
+
+def test_should_fail_when_instance_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='denomination',\n"
+        "    shape=DenominationShape(),\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    default_value='GBP',\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "INSTANCE_UPDATE_PERMISSION" for v in violations)
+    assert any("denomination" in v.message for v in violations)
+
+
+def test_should_pass_when_instance_parameter_sets_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='denomination',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    update_permission=ParameterUpdatePermission.USER_EDITABLE,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_pass_when_template_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='interest_rate',\n"
+        "    level=ParameterLevel.TEMPLATE,\n"
+        "    default_value=Decimal('0.05'),\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_pass_when_derived_instance_parameter_omits_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='accrued_interest',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    derived=True,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_fail_when_derived_parameter_sets_update_permission(
+    tmp_path: Path,
+) -> None:
+    code = (
+        "p = Parameter(\n"
+        "    name='accrued_interest',\n"
+        "    level=ParameterLevel.INSTANCE,\n"
+        "    derived=True,\n"
+        "    update_permission=ParameterUpdatePermission.USER_EDITABLE,\n"
+        ")\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "DERIVED_UPDATE_PERMISSION" for v in violations)
+
+
+# ── Hook data requirements (API 4.0) ─────────────────────────
+
+
+def test_should_fail_when_hook_reads_parameters_without_requires(tmp_path: Path) -> None:
+    code = (
+        "def pre_posting_hook(vault, hook_arguments):\n"
+        "    return vault.get_parameter_timeseries(name='denomination').latest()\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "MISSING_PARAMETERS_REQUIREMENT" for v in violations)
+
+
+def test_should_fail_when_hook_reads_balances_without_fetcher(tmp_path: Path) -> None:
+    code = (
+        "def pre_posting_hook(vault, hook_arguments):\n"
+        "    return vault.get_balances_observation(fetcher_id='live_balances').balances\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "MISSING_BALANCES_FETCHER" for v in violations)
+
+
+def test_should_pass_when_hook_declares_both_requirements(tmp_path: Path) -> None:
+    code = (
+        "@requires(parameters=True)\n"
+        "@fetch_account_data(balances=['live_balances'])\n"
+        "def pre_posting_hook(vault, hook_arguments):\n"
+        "    d = vault.get_parameter_timeseries(name='denomination').latest()\n"
+        "    return vault.get_balances_observation(fetcher_id='live_balances').balances\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_detect_requirement_through_helper_call(tmp_path: Path) -> None:
+    code = (
+        "def _param(vault, name):\n"
+        "    return vault.get_parameter_timeseries(name=name).latest()\n"
+        "\n"
+        "def scheduled_event_hook(vault, hook_arguments):\n"
+        "    return _param(vault, 'denomination')\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert any(v.rule == "MISSING_PARAMETERS_REQUIREMENT" for v in violations)
+
+
+def test_should_not_flag_non_hook_helper_that_reads_parameters(tmp_path: Path) -> None:
+    code = (
+        "def _param(vault, name):\n"
+        "    return vault.get_parameter_timeseries(name=name).latest()\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
+def test_should_accept_requires_balances_range_for_balances(tmp_path: Path) -> None:
+    code = (
+        "@requires(parameters=True, balances='latest live')\n"
+        "def scheduled_event_hook(vault, hook_arguments):\n"
+        "    vault.get_parameter_timeseries(name='x').latest()\n"
+        "    return vault.get_balances_observation(fetcher_id='b').balances\n"
+    )
+    violations = lint_source(tmp_path, code)
+    assert violations == []
+
+
 # ── main() exit codes ─────────────────────────────────────────
 
 
@@ -260,7 +401,7 @@ def test_main_should_return_0_when_no_violations(tmp_path: Path, capsys) -> None
     out = capsys.readouterr().out
     assert "Checking Vault sandbox restrictions..." in out
     assert "✔ No stdlib imports detected" in out
-    assert "✔ 7/7 Vault rules — CLEAN" in out
+    assert "✔ 9/9 Vault rules — CLEAN" in out
 
 
 def test_main_should_return_1_when_violations_found(tmp_path: Path, capsys) -> None:

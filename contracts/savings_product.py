@@ -3,10 +3,13 @@
 # Contracts Language API 4.0
 
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceDefaultDict,
+    BalancesObservationFetcher,
     CustomInstruction,
+    DefinedDateTime,
     DenominationShape,
     EndOfMonthSchedule,
     NumberShape,
@@ -26,11 +29,13 @@ from contracts_api import (
     ScheduledEventHookResult,
     SmartContractEventType,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal, ROUND_HALF_UP
 
 api          = "4.0.0"
-version      = "1.1.0"
+version      = "1.2.1"
 display_name = "Basic Savings Account"
 summary      = "Savings account with monthly interest accrual"
 description  = (
@@ -65,6 +70,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account denomination. One currency per account.",
         default_value="GBP",
@@ -72,13 +78,19 @@ parameters = [
 ]
 
 event_types = [
-    SmartContractEventType(
-        name=INTEREST_ACCRUAL,
-        scheduler_tag_ids=["SAVINGS_INTEREST_ACCRUAL_AST"],
-    ),
+    # No scheduler_tag_ids: a referenced tag must already exist in the target
+    # Vault instance or POST /v1/accounts fails with TAG_NOT_FOUND. Ops can
+    # attach a tag at deploy time if schedule management is needed.
+    SmartContractEventType(name=INTEREST_ACCRUAL),
 ]
 
 event_types_groups = []
+
+# API 4.0: a hook that calls get_balances_observation() must declare the
+# fetcher here and request it via @fetch_account_data on the hook.
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 
 # ── Pure helpers ──────────────────────────────────────────────
 
@@ -137,6 +149,8 @@ def activation_hook(
     return ActivationHookResult(scheduled_events_return_value=scheduled_events)
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:
@@ -171,6 +185,8 @@ def pre_posting_hook(
     return PrePostingHookResult()
 
 
+@requires(event_type="INTEREST_ACCRUAL", parameters=True)
+@fetch_account_data(event_type="INTEREST_ACCRUAL", balances=["live_balances"])
 def scheduled_event_hook(
     vault, hook_arguments: ScheduledEventHookArguments
 ) -> ScheduledEventHookResult:

@@ -1,0 +1,59 @@
+#!/usr/bin/bash
+# os-vault-customer — Create a test customer in Vault (needed before os-vault-account)
+# v2: header X-Auth-Token corregido (sin Bearer), os_load_env agregado,
+#     imprime resultado via script Python aparte (sin heredoc con rutas embebidas)
+# Usage: os-vault-customer [first_name] [last_name]
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OS_CLI_LIB="${SCRIPT_DIR}/../lib"
+
+source "${OS_CLI_LIB}/colors.sh"
+source "${OS_CLI_LIB}/config.sh"
+os_load_config
+os_load_env
+
+FIRST_NAME="${1:-OpenSpec}"
+LAST_NAME="${2:-TestCustomer}"
+
+if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
+    exit 1
+fi
+
+os_print_separator
+os_print_header "OpenSpec — Vault Customer Creation"
+os_print_separator
+os_print_info "First name : ${FIRST_NAME}"
+os_print_info "Last name  : ${LAST_NAME}"
+os_print_info "Vault URL  : ${VAULT_BASE_URL}"
+os_print_separator
+
+os_step "Building customer payload..."
+PAYLOAD_FILE=$(mktemp /tmp/os-vault-customer-XXXXXX.json)
+RESULT_FILE=$(mktemp /tmp/os-vault-customer-result-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+
+"${OS_PYTHON}" -X utf8 "${OS_CLI_LIB}/vault_customer_payload.py" \
+    "${FIRST_NAME}" \
+    "${LAST_NAME}" > "${PAYLOAD_FILE}"
+
+os_step "Calling POST /v1/customers ..."
+
+HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+    -X POST \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d @"${PAYLOAD_FILE}" \
+    "${VAULT_BASE_URL}/v1/customers")
+
+if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "201" ]; then
+    os_print_error "Customer creation failed (HTTP ${HTTP_STATUS}):"
+    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
+    exit 1
+fi
+
+"${OS_PYTHON}" -X utf8 "${OS_CLI_LIB}/vault_customer_print_result.py" "${RESULT_FILE}"
+
+os_print_separator

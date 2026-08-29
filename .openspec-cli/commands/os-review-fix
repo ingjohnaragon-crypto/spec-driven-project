@@ -38,11 +38,16 @@ os_load_language
 cd "$OS_REPO_ROOT"
 
 REVIEW_FILE="$OS_REPO_ROOT/.openspec-cli/.review-output.md"
-
+REVIEW_FILE_APPLIED="$OS_REPO_ROOT/.openspec-cli/.review-output.md.applied"
 if [ ! -f "$REVIEW_FILE" ] || [ ! -s "$REVIEW_FILE" ]; then
-  os_error "No review found at .openspec-cli/.review-output.md"
-  os_info  "Run: os-review $PR_NUMBER first"
-  exit 1
+  if [ -f "$REVIEW_FILE_APPLIED" ] && [ -s "$REVIEW_FILE_APPLIED" ]; then
+    REVIEW_FILE="$REVIEW_FILE_APPLIED"
+    os_info "Using archived review: .review-output.md.applied"
+  else
+    os_error "No review found at .openspec-cli/.review-output.md"
+    os_info  "Run: os-review $PR_NUMBER first"
+    exit 1
+  fi
 fi
 
 os_divider
@@ -200,7 +205,7 @@ fi
 os_divider
 os_step "Running tests to verify fixes..."
 
-if $OS_TEST_CMD 2>&1; then
+if bash -c "$OS_TEST_CMD" 2>&1; then
   os_success "All tests pass after fixes!"
 else
   os_error "Tests failed after fixes — review the errors above."

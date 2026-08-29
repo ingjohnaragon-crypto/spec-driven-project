@@ -2,7 +2,8 @@
 # os-vault-deploy — Deploy a Smart Contract as a ProductVersion in Vault Core
 # Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]
 # Example:
-#   os-vault-deploy contracts/savings_product.py savings_product "Savings Product v2" 3.11.0
+#   os-vault-deploy contracts/savings_product.py openspec_savings_product "Savings Product"
+#   (api_version defaults to 4.0.0 — override only for a legacy 3.x contract)
 
 set -euo pipefail
 
@@ -11,15 +12,17 @@ OS_CLI_LIB="${SCRIPT_DIR}/../lib"
 
 source "${OS_CLI_LIB}/colors.sh"
 source "${OS_CLI_LIB}/config.sh"
+os_load_config
+os_load_env
 
 CONTRACT_FILE="${1:-}"
 PRODUCT_ID="${2:-}"
 DISPLAY_NAME="${3:-}"
-API_VERSION="${4:-3.11.0}"
+API_VERSION="${4:-4.0.0}"
 
 if [ -z "${CONTRACT_FILE}" ] || [ -z "${PRODUCT_ID}" ] || [ -z "${DISPLAY_NAME}" ]; then
     os_print_error "Usage: os-vault-deploy <contract_file> <product_id> <display_name> [api_version]"
-    os_print_info  "Example: os-vault-deploy contracts/savings_product.py savings_product \"Savings Product\" 3.11.0"
+    os_print_info  "Example: os-vault-deploy contracts/savings_product.py openspec_savings_product \"Savings Product\""
     exit 1
 fi
 
@@ -56,14 +59,24 @@ trap "rm -f ${PAYLOAD_FILE}" EXIT
 os_step "Calling POST /v1/product-versions ..."
 
 RESULT_FILE=$(mktemp /tmp/os-vault-deploy-result-XXXXXX.json)
-trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+CURL_ERR_FILE=$(mktemp /tmp/os-vault-deploy-err-XXXXXX)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE} ${CURL_ERR_FILE}" EXIT
 
-HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+set +e
+HTTP_STATUS=$(curl -sS -o "${RESULT_FILE}" -w "%{http_code}" \
     -X POST \
-    -H "X-Auth-Token: Bearer ${VAULT_TOKEN}" \
+    -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
     -d @"${PAYLOAD_FILE}" \
-    "${VAULT_BASE_URL}/v1/product-versions")
+    "${VAULT_BASE_URL}/v1/product-versions" 2>"${CURL_ERR_FILE}")
+CURL_EXIT=$?
+set -e
+
+if [ "${CURL_EXIT}" != "0" ]; then
+    os_print_error "Could not reach Vault (curl exit code ${CURL_EXIT}):"
+    cat "${CURL_ERR_FILE}" >&2
+    exit 1
+fi
 
 if [ "${HTTP_STATUS}" != "200" ]; then
     os_print_error "Deploy failed (HTTP ${HTTP_STATUS}):"
@@ -71,22 +84,9 @@ if [ "${HTTP_STATUS}" != "200" ]; then
     exit 1
 fi
 
-"${OS_PYTHON}" << PYEOF
-import json
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_deploy_print_result.py" "${RESULT_FILE}"
 
-with open("${RESULT_FILE}") as f:
-    result = json.load(f)
-
-pv = result.get("product_version", result)
-print(f"\n✅ Product version deployed successfully!")
-print(f"   product_version_id : {pv.get('id','?')}")
-print(f"   product_id         : {pv.get('product_id','?')}")
-print(f"   display_name       : {pv.get('display_name','?')}")
-print(f"   is_current         : {pv.get('is_current','?')}")
-print(f"   api_version        : {pv.get('contracts_language_api_version','?')}")
-print(f"\n   Next steps:")
-print(f"   1. Create an account: os-vault-account <product_version_id>")
-print(f"   2. Test with postings via Vault dashboard or API")
-PYEOF
+LOG_FILE="${OS_REPO_ROOT}/.openspec-cli/.vault-deployed-products.log"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_log_deploy.py" "${RESULT_FILE}" "${LOG_FILE}" "${CONTRACT_FILE}"
 
 os_print_separator

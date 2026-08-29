@@ -46,7 +46,8 @@ from contracts_api import (
     BalanceCoordinate, Balance, BalanceDefaultDict,
     Phase, Tside, Posting, CustomInstruction,
     PostingInstructionsDirective, PostingInstructionsDirective,
-    Parameter, ParameterLevel, NumberShape, StringShape,
+    Parameter, ParameterLevel, ParameterUpdatePermission,
+    NumberShape, StringShape,
     DenominationShape, UnionShape, UnionItem,
     ScheduledEvent, SmartContractEventType, EndOfMonthSchedule,
     Rejection, RejectionReason,
@@ -197,6 +198,71 @@ Parameter(name="maturity_date", shape=DateShape(),
           level=ParameterLevel.INSTANCE, ...)  # no default_value → crash
 ```
 
+### `ParameterLevel.INSTANCE` requires `update_permission`; DERIVED/TEMPLATE must not
+
+Enforced by `vault_lint.py` (`INSTANCE_UPDATE_PERMISSION` / `DERIVED_UPDATE_PERMISSION`) —
+the deploy rejects an instance-level parameter with no `update_permission`, and rejects
+`update_permission` on a `derived=True` or `TEMPLATE` parameter. Enum values have no type
+prefix (`USER_EDITABLE`, not `PARAMETER_UPDATE_PERMISSION_USER_EDITABLE`).
+
+```python
+# CORRECT — non-derived INSTANCE parameter
+Parameter(name="denomination", shape=DenominationShape(),
+          level=ParameterLevel.INSTANCE,
+          update_permission=ParameterUpdatePermission.USER_EDITABLE,
+          default_value="GBP")
+
+# CORRECT — derived parameter: no update_permission
+Parameter(name="accrued_interest", shape=NumberShape(),
+          level=ParameterLevel.INSTANCE, derived=True)
+
+# WRONG — INSTANCE without update_permission → "must be specified for parameters
+# at instance level" at deploy time
+Parameter(name="denomination", shape=DenominationShape(),
+          level=ParameterLevel.INSTANCE, default_value="GBP")
+```
+
+`default_value` on an INSTANCE parameter only applies to account migrations — the real
+value is supplied at account creation (`os-vault-account`), never at deploy.
+
+### Every hook declares its data requirements (API 4.0)
+
+Enforced by `vault_lint.py` (`MISSING_PARAMETERS_REQUIREMENT` / `MISSING_BALANCES_FETCHER`);
+verified by `os-vault-simulate`. A missing requirement passes every mocked unit test
+and then fails on real Vault with `InvalidSmartContractError: Timeseries '<param>' not found`.
+
+```python
+from contracts_api import BalancesObservationFetcher, DefinedDateTime, fetch_account_data, requires
+
+data_fetchers = [                        # metadata name is data_fetchers, NOT balance_observation_fetchers
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
+
+@requires(parameters=True)               # any get_parameter_timeseries / get_parameters_observation
+@fetch_account_data(balances=["live_balances"])   # any get_balances_observation
+def pre_posting_hook(vault, hook_arguments): ...
+
+@requires(event_type="ACCRUE_INTEREST", parameters=True)   # scheduled: one set per event_type
+@fetch_account_data(event_type="ACCRUE_INTEREST", balances=["live_balances"])
+def scheduled_event_hook(vault, hook_arguments): ...
+```
+
+The requirement is the union of what the hook and every helper it calls touch
+(`_handle_x(vault)`, `_param(vault, name)`). `activation_hook` and
+`derived_parameter_hook` that read parameters need `@requires(parameters=True)` too.
+
+### Deploy to the shared sandbox
+
+- `product_id` for a real deploy uses an own prefix (`openspec_<name>`); the bare
+  contract name collides with pre-existing sandbox products.
+- Bump `version` in the `.py` for every real deploy attempt.
+- TEMPLATE/GLOBAL parameters need `{"name", "value"}` in the deploy payload; INSTANCE
+  parameters do not (supplied at account creation).
+- Auth header is `X-Auth-Token: <token>` (plain token), not `Authorization: Bearer`.
+- `/v1/contracts:simulate` streams NDJSON; balances use `/v1/balances/live?account_ids=…`.
+
+Full detail: `ai-specs/specs/stacks/vault-core-api-gotchas.md`.
+
 ### Penalty and income postings — never credit `DEFAULT`
 
 A forfeiture or fee must credit an internal income address, not the customer's `DEFAULT`
@@ -223,5 +289,10 @@ Posting(credit=True, amount=penalty, account_address=DEFAULT_ADDRESS, ...)
 - Always mock `vault.get_balances_observation().balances` not `vault.get_balance_timeseries()`
 - `OptionalValue` in test fixtures must wrap `datetime`, not `date` (see SDK behaviours above)
 - Assert **both** legs of a two-CI operation (e.g. net payout AND penalty forfeiture)
+- Every INSTANCE `Parameter` in a contract declares `update_permission`; `derived=True`
+  and `TEMPLATE` parameters never do (`os-vault-lint` fails the build otherwise)
+- Every hook that reads parameters/balances declares `@requires` / `@fetch_account_data`
 - Coverage threshold: **≥ 90%**
-- Run: `os-vault-test --coverage`
+- Run `os-vault-test --coverage` **and** `os-vault-simulate <contract>` before a PR —
+  simulation catches runtime errors (missing requirements, load-time crashes) that the
+  mocked unit tests structurally cannot

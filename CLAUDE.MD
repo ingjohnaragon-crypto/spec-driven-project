@@ -25,20 +25,15 @@ open-spec/
 ├── openspec/config.yaml              # Stack activo + agente activo
 ├── ai-specs/
 │   ├── .agents/stacks/
-│   │   ├── vault-smart-contracts.md  ← agente principal (API 4.0 verificada)
-│   │   ├── java-spring.md
-│   │   ├── python-fastapi.md
-│   │   └── ...
+│   │   └── vault-smart-contracts.md  ← único agente (API 4.0 verificada)
 │   ├── specs/stacks/
-│   │   └── stacks/vault-smart-contracts-standards.mdc
-│   ├── .commands/                    # Plantillas de prompt
-│   └── changes/                      # Planes generados por ticket
-├── contracts/
-│   ├── savings_product.py            # Smart Contract cuenta de ahorros
-│   └── current_account.py            # Smart Contract cuenta corriente con sobregiro
-├── tests/
-│   ├── test_savings_product.py       # 18 tests ✅
-│   └── test_current_account.py       # 20 tests ✅
+│   │   ├── vault-smart-contracts-standards.mdc
+│   │   └── vault-core-api-gotchas.md   # hallazgos Core API (deploy/account/balances)
+│   ├── .commands/                    # Plantillas de prompt (plan/develop/review/enrich vault)
+│   └── changes/planes|enriquecimientos/KAN-XX/   # planes y enriquecimientos por ticket
+├── contracts/                        # 5 Smart Contracts (savings, current_account,
+│   │                                #   fixed_term_deposit, personal_loan, cuenta_joven)
+├── tests/                            # 135 tests de contratos + 54 de vault_lint ✅
 ├── contracts_sdk/                    # SDK Thought Machine (local)
 │   └── contracts_sdk/                # py -m pip install . desde aquí
 ├── .openspec-cli/
@@ -47,23 +42,22 @@ open-spec/
 │   │   ├── config.sh
 │   │   ├── agent.sh
 │   │   ├── jira.sh                   # incluye os_jira_create_ticket, os_jira_list_tickets
-│   │   ├── vault.sh
 │   │   ├── parse_config.py
 │   │   ├── parse_agent.py
 │   │   ├── parse_stack.py
-│   │   ├── vault_simulate_payload.py
+│   │   ├── vault_simulate.py         # POST /v1/contracts:simulate (streaming NDJSON)
 │   │   └── vault_deploy_payload.py
-│   └── commands/                     # 16 comandos os-*
+│   └── commands/                     # 23 comandos os-*
 └── .github/workflows/ci.yml          # CI con contracts_api SDK
 ```
 
 ---
 
-## 16 Comandos CLI
+## Comandos CLI
 
 ### Configuración
 ```bash
-os-stack --list                        # listar stacks disponibles
+os-stack --list                        # muestra el stack (solo vault-smart-contracts)
 os-stack vault-smart-contracts         # activar stack
 os-agent --list                        # listar agentes
 os-agent claude-code                   # activar agente (o copilot)
@@ -100,6 +94,12 @@ os-vault-test --coverage               # con cobertura ≥ 90%
 os-vault-test tests/test_savings_product.py    # archivo específico
 os-vault-simulate contracts/<product>.py <start> <end> '<params>'
 os-vault-deploy contracts/<product>.py <product_id> "<display name>"
+os-vault-products                      # sin banderas = --mine (sandbox compartido entre equipos)
+os-vault-products --mine --all         # incluye versiones no vigentes, solo mis productos
+os-vault-products --all-unsafe         # TODO el sandbox compartido -- pide confirmación con el conteo
+os-vault-products --id savings_product # consulta un producto puntual por id (repetible: --id a --id b)
+os-vault-products --backfill           # registra en el log --mine los productos existentes (allowlist / prefijo openspec_)
+os-vault-products --prune              # limpia del log --mine cualquier producto que no sea mío (hace backup .bak)
 os-vault-account <product_version_id> <customer_id>
 os-vault-balances <account_id>
 ```
@@ -139,17 +139,14 @@ os-transition KAN-XX "Done"       # cierra el ticket en Jira
 
 ---
 
-## Stacks soportados
+## Stack
 
 ```yaml
-vault-smart-contracts   # Thought Machine Vault API 4.0 (stack principal)
-java-spring             # Java 17 + Spring Boot
-python-fastapi          # Python 3.12 + FastAPI
-node-express            # Node.js + Express
-go-gin                  # Go + Gin
-frontend-react          # React + Vite
-frontend-angular        # Angular
+vault-smart-contracts   # Thought Machine Vault API 4.0 — único stack del repo
 ```
+
+`openspec/config.yaml` mantiene la forma de "registry" por si se añade otro stack
+más adelante, pero hoy solo existe el de Vault.
 
 ---
 
@@ -178,12 +175,14 @@ getattr(), setattr(), type(), dir()
 raise X from Y
 GLOBAL_MUTABLE = {}  # no estado global mutable
 requests.get()       # no red
+float(), 1.5          # nada de float — Decimal siempre
 ```
 
 ### PERMITIDO
 ```python
 from decimal import Decimal, ROUND_HALF_UP   # obligatorio para dinero
-from contracts_api import (...)              # único módulo externo
+from zoneinfo import ZoneInfo                # para datetimes UTC
+from contracts_api import (...)              # único módulo de dominio
 str, int, list, dict, sorted(), sum()        # built-ins básicos
 hook_arguments.effective_datetime            # así se obtiene la fecha
 ```
@@ -231,7 +230,35 @@ PrePostingHookArguments(
 # get_balances_observation (no get_balance_timeseries)
 balances = vault.get_balances_observation(fetcher_id="live_balances").balances  # ✅
 balances = vault.get_balance_timeseries().latest()  # ❌ API 3.x
+
+# update_permission obligatorio en TODO Parameter(level=ParameterLevel.INSTANCE)
+Parameter(name="denomination", level=ParameterLevel.INSTANCE,
+          update_permission=ParameterUpdatePermission.USER_EDITABLE, ...)  # ✅
+# ❌ sin update_permission → el DEPLOY falla ("must be specified for parameters at instance level")
+# ❌ update_permission en un param derived=True o TEMPLATE → rechazado
+# vault_lint.py lo verifica: reglas INSTANCE_UPDATE_PERMISSION / DERIVED_UPDATE_PERMISSION
+
+# Todo hook que lee parámetros/balances DEBE declarar el requirement
+from contracts_api import BalancesObservationFetcher, DefinedDateTime, fetch_account_data, requires
+data_fetchers = [BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE)]  # NO balance_observation_fetchers
+@requires(parameters=True)                          # get_parameter_timeseries()
+@fetch_account_data(balances=["live_balances"])     # get_balances_observation()
+def pre_posting_hook(vault, hook_arguments): ...
+# ❌ sin decoradores → InvalidSmartContractError: Timeseries 'x' not found (los tests mockeados NO lo ven)
+# scheduled_event_hook: un @requires + un @fetch_account_data por cada event_type
+# vault_lint.py lo verifica: MISSING_PARAMETERS_REQUIREMENT / MISSING_BALANCES_FETCHER
 ```
+
+### Deploy al sandbox compartido (hallazgos sesión KAN-12)
+
+- `product_id` con prefijo propio (`openspec_<nombre>`); el nombre pelado choca con productos preexistentes
+- Subir `version` en el `.py` en cada intento de deploy real
+- Parámetros TEMPLATE/GLOBAL necesitan `value` en el payload; los INSTANCE no (van al crear la cuenta)
+- Header `X-Auth-Token: <token>` (token plano), NO `Authorization: Bearer`
+- `/v1/contracts:simulate` es NDJSON en streaming y **funciona con la VPN corporativa activa**
+  (sin VPN el `connect()` al host hace timeout). `os-vault-simulate` abre la cuenta dentro
+  de la simulación; `DateShape` va como `"YYYY-MM-DD"` (un datetime provoca HTTP 500)
+- Detalle completo: `ai-specs/specs/stacks/vault-core-api-gotchas.md`
 
 ---
 
@@ -255,22 +282,21 @@ VAULT_DEFAULT_DENOMINATION=GBP
 ## Estado actual del proyecto
 
 ### Completado ✅
-- CLI con 16 comandos operativos
-- 7 stacks configurados
+- CLI de comandos `os-*` operativa (config, Jira, workflow, Vault)
+- Repo enfocado 100% en Vault (stacks no-Vault retirados)
 - Integración Jira completa (fetch, create, transition, list, enrich)
 - Integración GitHub (PR, review, merge)
-- Stack vault-smart-contracts con restricciones Python de Vault documentadas
-- Vault Core API integrada (simulate, deploy, account, balances)
-- `savings_product.py` — 18 tests verdes, API 4.0 verificada
-- `current_account.py` — sobregiro configurable, 20 tests verdes
-- CI GitHub Actions con contracts_api SDK (18+20 tests)
+- `vault_lint.py` — 9 reglas de sandbox (`update_permission` en INSTANCE, data requirements por hook)
+- Vault Core API integrada (simulate, deploy, account, balances, customer, products)
+- 5 contratos con 135 tests verdes + 54 de vault_lint, API 4.0 verificada
+- Hallazgos Core API (KAN-12 + sesión simulate 2026-08-28) en agente + standards + linter
+- `os-vault-simulate` operativo (streaming NDJSON con VPN); los 5 contratos simulan limpio
+- CI GitHub Actions con contracts_api SDK
 - `os-review-fix` — loop automático de corrección + re-review
 - `os-commit` protege develop/main (siempre crea feature branch)
-- CLAUDE.md con contexto completo del proyecto
 
 ### Pendiente ⏳
-- Prueba E2E contra Vault Sandbox (requiere acceso GFT/TM)
-- `os-vault-simulate` y `os-vault-deploy` (requieren sandbox)
+- Prueba E2E completa contra Vault Sandbox: simulate ✅ (con VPN); falta deploy→account→balances en verde de punta a punta
 - Dashboard de métricas de adopción (Fase 2)
 - Repositorio de specs base GFT reutilizables
 

@@ -6,7 +6,7 @@ This repository is a spec-driven AI workflow, not a conventional app service. Th
 
 - `openspec/config.yaml` is the source of truth for the active stack, active agent, and language. It also defines the stack-specific build/test/lint commands.
 - `ai-specs/` stores the reusable architectural standards and prompts used to drive AI-assisted development. The active stack for this repo is `vault-smart-contracts`.
-- `contracts/` contains the Vault Smart Contract implementations (`savings_product.py`, `current_account.py`, `fixed_term_deposit.py`).
+- `contracts/` contains the Vault Smart Contract implementations (`savings_product.py`, `current_account.py`, `fixed_term_deposit.py`, `personal_loan.py`, `cuenta_joven.py`).
 - `tests/` contains the contract test suite and validation scripts.
 - `.openspec-cli/` contains the CLI workflow (`os-*` commands) and the `vault_lint.py` sandbox validator.
 - `contracts_sdk/contracts_sdk/` is the local Thought Machine SDK that must be installed before running Vault contract checks.
@@ -40,6 +40,8 @@ pytest tests/test_vault_lint.py -v
 pytest tests/test_savings_product.py -v
 pytest tests/test_current_account.py -v
 pytest tests/test_fixed_term_deposit.py -v
+pytest tests/test_personal_loan.py -v
+pytest tests/test_cuenta_joven.py -v
 ```
 
 ### Full validation
@@ -74,6 +76,8 @@ Do not introduce patterns like these into `contracts/*.py`:
 - mutable global state; avoid module-level caches or counters
 - network access or side effects
 - `raise ... from ...` exception chaining
+- floats — use `Decimal` for every monetary value
+- `Parameter(level=ParameterLevel.INSTANCE, ...)` without `update_permission` (required by the Vault deploy); conversely, never set `update_permission` on a `derived=True` or `TEMPLATE` parameter
 
 Use only the Vault-compatible subset and keep logic pure and deterministic.
 
@@ -97,6 +101,10 @@ The project includes repo-specific rules from the Vault API 4.0 migration. When 
 - `CustomInstruction` does not take `client_transaction_id`
 - `PrePostingHookArguments` requires `client_transactions={}`
 - prefer `vault.get_balances_observation(fetcher_id="live_balances")` over legacy balance time-series APIs
+- every INSTANCE parameter declares `update_permission=ParameterUpdatePermission.USER_EDITABLE`; derived parameters use `Parameter(derived=True)` inside `parameters`, never `DerivedParameter`
+- every hook that reads a parameter or calls `get_balances_observation()` declares it: `@requires(parameters=True)` and/or `@fetch_account_data(balances=["live_balances"])` (one set per `event_type` on `scheduled_event_hook`); the module fetcher list is `data_fetchers`, not `balance_observation_fetchers`. Missing this passes the mocked tests and fails on real Vault.
+- for a real deploy: own `product_id` prefix (`openspec_…`), bump `version` per attempt, auth header `X-Auth-Token` (not `Bearer`). See `ai-specs/specs/stacks/vault-core-api-gotchas.md`.
+- run `os-vault-simulate <contract>` (needs the corporate VPN) before considering a contract done — it executes the hooks against an in-memory Vault.
 
 These are not just style preferences; they are compatibility constraints for the installed SDK.
 

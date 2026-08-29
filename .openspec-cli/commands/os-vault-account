@@ -1,6 +1,9 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # os-vault-account — Create a test account in Vault linked to a product version
-# Usage: os-vault-account <product_version_id> <customer_id> [denomination]
+# v5: vuelve a instance_param_vals (nombre original, anidado dentro de
+#     "account"), pero ahora con TODOS los parametros INSTANCE requeridos,
+#     no solo denomination como en el intento original.
+# Usage: os-vault-account <product_version_id> <customer_id> [denomination] [instance_params_json]
 
 set -euo pipefail
 
@@ -15,42 +18,76 @@ os_load_env
 PRODUCT_VERSION_ID="${1:-}"
 CUSTOMER_ID="${2:-}"
 DENOMINATION="${3:-${VAULT_DEFAULT_DENOMINATION:-GBP}}"
+if [ -z "${4:-}" ]; then
+    INSTANCE_PARAMS_JSON="{}"
+else
+    INSTANCE_PARAMS_JSON="$4"
+fi
 
 if [ -z "${PRODUCT_VERSION_ID}" ] || [ -z "${CUSTOMER_ID}" ]; then
-    os_print_error "Usage: os-vault-account <product_version_id> <customer_id> [denomination]"
+    os_print_error "Usage: os-vault-account <product_version_id> <customer_id> [denomination] [instance_params_json]"
+    exit 1
+fi
+
+if [ -z "${VAULT_BASE_URL:-}" ] || [ -z "${VAULT_TOKEN:-}" ]; then
+    os_print_error "Missing Vault credentials. Add VAULT_BASE_URL and VAULT_TOKEN to .env"
     exit 1
 fi
 
 os_print_separator
 os_print_header "OpenSpec — Vault Account Creation"
 os_print_separator
+os_print_info "Product version : ${PRODUCT_VERSION_ID}"
+os_print_info "Customer        : ${CUSTOMER_ID}"
+os_print_info "Denomination    : ${DENOMINATION}"
+os_print_separator
 
-PAYLOAD=$(cat << JSONEOF
-{
-  "account": {
-    "product_version_id": "${PRODUCT_VERSION_ID}",
-    "name": "OpenSpec Test Account",
-    "stakeholder_ids": ["${CUSTOMER_ID}"],
-    "permitted_denominations": ["${DENOMINATION}"],
-    "status": "ACCOUNT_STATUS_OPEN",
-    "instance_param_vals": {
-      "denomination": "${DENOMINATION}"
+PAYLOAD_FILE=$(mktemp /tmp/os-vault-account-XXXXXX.json)
+RESULT_FILE=$(mktemp /tmp/os-vault-account-result-XXXXXX.json)
+trap "rm -f ${PAYLOAD_FILE} ${RESULT_FILE}" EXIT
+
+"${OS_PYTHON}" -c "
+import json, sys, uuid
+
+product_version_id = sys.argv[1]
+customer_id = sys.argv[2]
+denomination = sys.argv[3]
+instance_params = json.loads(sys.argv[4])
+
+instance_param_vals = {'denomination': denomination}
+instance_param_vals.update({k: str(v) for k, v in instance_params.items()})
+
+payload = {
+    'request_id': str(uuid.uuid4()),
+    'account': {
+        'product_version_id': product_version_id,
+        'name': 'OpenSpec Test Account',
+        'stakeholder_ids': [customer_id],
+        'permitted_denominations': [denomination],
+        'status': 'ACCOUNT_STATUS_OPEN',
+        'instance_param_vals': instance_param_vals
     }
-  }
 }
-JSONEOF
-)
+print(json.dumps(payload, indent=2))
+" "${PRODUCT_VERSION_ID}" "${CUSTOMER_ID}" "${DENOMINATION}" "${INSTANCE_PARAMS_JSON}" > "${PAYLOAD_FILE}"
+
+cp "${PAYLOAD_FILE}" /tmp/last-account-payload.json
 
 os_step "Calling POST /v1/accounts ..."
 
-RESULT=$(curl -sf -X POST \
+HTTP_STATUS=$(curl -s -o "${RESULT_FILE}" -w "%{http_code}" \
+    -X POST \
     -H "X-Auth-Token: ${VAULT_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "${PAYLOAD}" \
+    -d @"${PAYLOAD_FILE}" \
     "${VAULT_BASE_URL}/v1/accounts")
 
-ACCOUNT_ID=$(echo "${RESULT}" | "${OS_PYTHON}" -c "import json,sys; d=json.load(sys.stdin); print(d.get('account',d).get('id','?'))")
+if [ "${HTTP_STATUS}" != "200" ] && [ "${HTTP_STATUS}" != "201" ]; then
+    os_print_error "Account creation failed (HTTP ${HTTP_STATUS}):"
+    cat "${RESULT_FILE}" | "${OS_PYTHON}" -m json.tool 2>/dev/null || cat "${RESULT_FILE}"
+    exit 1
+fi
 
-os_print_success "Account created: ${ACCOUNT_ID}"
-os_print_info "Check balances: os-vault-balances ${ACCOUNT_ID}"
+"${OS_PYTHON}" "${OS_CLI_LIB}/vault_account_print_result.py" "${RESULT_FILE}"
+
 os_print_separator

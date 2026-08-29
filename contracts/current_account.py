@@ -1,8 +1,11 @@
 from contracts_api import (
+    ParameterUpdatePermission,
     ActivationHookArguments,
     ActivationHookResult,
     BalanceCoordinate,
     BalanceDefaultDict,
+    BalancesObservationFetcher,
+    DefinedDateTime,
     DenominationShape,
     NumberShape,
     Parameter,
@@ -17,11 +20,13 @@ from contracts_api import (
     ScheduledEventHookArguments,
     ScheduledEventHookResult,
     Tside,
+    fetch_account_data,
+    requires,
 )
 from decimal import Decimal
 
 api = "4.0.0"
-version = "1.1.0"
+version = "1.1.1"
 display_name = "Current Account with Overdraft"
 summary = "Current account product with authorized overdraft limit"
 description = (
@@ -39,6 +44,7 @@ parameters = [
         name="denomination",
         shape=DenominationShape(permitted_denominations=supported_denominations),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Denomination",
         description="Account currency denomination. One currency per account.",
         default_value="GBP",
@@ -50,6 +56,7 @@ parameters = [
             step=Decimal("0.01"),
         ),
         level=ParameterLevel.INSTANCE,
+        update_permission=ParameterUpdatePermission.USER_EDITABLE,
         display_name="Overdraft Limit",
         description="Maximum permitted overdraft for the account.",
         default_value=Decimal("0.00"),
@@ -58,6 +65,11 @@ parameters = [
 
 event_types = []
 event_types_groups = []
+
+# API 4.0: hooks that call get_balances_observation() declare the fetcher here.
+data_fetchers = [
+    BalancesObservationFetcher(fetcher_id="live_balances", at=DefinedDateTime.LIVE),
+]
 
 
 def _get_committed_balance(
@@ -107,6 +119,8 @@ def activation_hook(
     return ActivationHookResult(scheduled_events_return_value={})
 
 
+@requires(parameters=True)
+@fetch_account_data(balances=["live_balances"])
 def pre_posting_hook(
     vault, hook_arguments: PrePostingHookArguments
 ) -> PrePostingHookResult:

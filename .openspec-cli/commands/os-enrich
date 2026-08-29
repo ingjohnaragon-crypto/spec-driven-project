@@ -31,10 +31,6 @@ os_jira_print_subtasks
 # ── Load context ─────────────────────────────────────────────
 AGENT_CONTENT="";    [ -f "$OS_AGENT_PATH" ]     && AGENT_CONTENT=$(cat "$OS_AGENT_PATH")
 STANDARDS_CONTENT="";[ -f "$OS_STANDARDS_PATH" ] && STANDARDS_CONTENT=$(cat "$OS_STANDARDS_PATH")
-API_SPEC="";          API_FILE="$OS_REPO_ROOT/ai-specs/specs/api-spec.yml"
-                      [ -f "$API_FILE" ] && API_SPEC=$(cat "$API_FILE")
-DATA_MODEL="";        DM_FILE="$OS_REPO_ROOT/ai-specs/specs/data-model.md"
-                      [ -f "$DM_FILE" ] && DATA_MODEL=$(cat "$DM_FILE")
 ENRICH_TEMPLATE="";   CMD_FILE="$OS_REPO_ROOT/ai-specs/.commands/enrich-us.md"
                       [ -f "$CMD_FILE" ] && ENRICH_TEMPLATE=$(cat "$CMD_FILE" | sed "s|\$ARGUMENTS|$TICKET_ID|g")
 
@@ -93,14 +89,6 @@ $AGENT_CONTENT
 ---
 ## Stack Standards
 $STANDARDS_CONTENT
-
----
-## Current API Spec
-$API_SPEC
-
----
-## Current Data Model
-$DATA_MODEL
 
 ---
 ## Your Task

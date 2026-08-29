@@ -68,6 +68,8 @@ os_load_env() {
   VAULT_TOKEN=$(_os_env_get VAULT_TOKEN)
   VAULT_DEFAULT_DENOMINATION=$(_os_env_get VAULT_DEFAULT_DENOMINATION)
   export JIRA_BASE_URL JIRA_EMAIL JIRA_TOKEN JIRA_PROJECT_KEY JIRA_STORY_POINTS_FIELD
+  export PYTHONIOENCODING=utf-8
+  export PYTHONUTF8=1
   export VAULT_BASE_URL VAULT_TOKEN VAULT_DEFAULT_DENOMINATION
   unset -f _os_env_get
   os_success "Loaded .env"
@@ -96,26 +98,15 @@ os_print_config() {
   os_divider
 }
 
-# Resolve ai-specs/.commands template path for plan | develop | review
+# Resolve ai-specs/.commands template path for plan | develop | review.
+# Vault Smart Contracts is the only shipped stack.
 os_command_template_path() {
   _kind="$1"
-  case "${OS_ACTIVE_STACK:-}" in
-    vault-smart-contracts)
-      case "$_kind" in
-        plan)    _base="plan-vault-contract" ;;
-        develop) _base="develop-vault-contract" ;;
-        review)  _base="review-vault-pr" ;;
-        *)       return 1 ;;
-      esac
-      ;;
-    *)
-      case "$_kind" in
-        plan)    _base="plan-backend-ticket" ;;
-        develop) _base="develop-backend" ;;
-        review)  _base="review-pr" ;;
-        *)       return 1 ;;
-      esac
-      ;;
+  case "$_kind" in
+    plan)    _base="plan-vault-contract" ;;
+    develop) _base="develop-vault-contract" ;;
+    review)  _base="review-vault-pr" ;;
+    *)       return 1 ;;
   esac
   echo "$OS_REPO_ROOT/ai-specs/.commands/${_base}.md"
 }
