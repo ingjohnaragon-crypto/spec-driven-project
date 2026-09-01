@@ -3,16 +3,27 @@
 #   POST /v1/contracts:simulate (streaming NDJSON)
 #
 # Usage:
-#   os-vault-simulate <contract_file> [start_ts] [end_ts] [param_overrides_json]
+#   os-vault-simulate <contract_file> [start_ts] [end_ts] [param_overrides_json] \
+#                     [--deposit N] [--payroll] [--deposit-on YYYY-MM-DD] \
+#                     [--all-accounts] [--verbose] [--raw]
 #
 # Examples:
 #   os-vault-simulate contracts/savings_product.py
 #   os-vault-simulate contracts/savings_product.py 2024-01-01T00:00:00Z 2024-04-01T00:00:00Z
 #   os-vault-simulate contracts/fixed_term_deposit.py "" "" '{"maturity_date":"2024-06-01T00:00:00Z"}'
+#   os-vault-simulate contracts/cuenta_nomina.py --deposit 1000            # fee actually charged
+#   os-vault-simulate contracts/cuenta_nomina.py --deposit 1500 --payroll  # marked as NOMINA
 #
 # The account is created inside the simulation. TEMPLATE/GLOBAL and INSTANCE
 # parameter values are auto-extracted from the contract; override any of them
 # with the JSON argument.
+#
+# The log shows every scheduled event, the postings it generates and the
+# running account balances after each one. Consecutive scheduled events that
+# move no money are folded into one line (--verbose to expand). --deposit N
+# seeds the account first (funded from a throw-away contra account opened
+# inside the simulation) so fees / interest have a balance to act on. --raw
+# dumps the NDJSON verbatim.
 
 set -euo pipefail
 
