@@ -166,14 +166,14 @@ class TestActivationHook:
         vault = make_vault(maturity_date=TODAY_MATURITY)
         args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AssertionError):
             contract.activation_hook(vault, args)
 
     def test_activation_rejects_maturity_past(self):
         vault = make_vault(maturity_date=PAST_MATURITY)
         args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AssertionError):
             contract.activation_hook(vault, args)
 
     def test_activation_rejects_unset_maturity_date(self):
@@ -181,7 +181,7 @@ class TestActivationHook:
         vault = make_vault(maturity_date=None)
         args  = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
 
-        with pytest.raises(ValueError):
+        with pytest.raises(AssertionError):
             contract.activation_hook(vault, args)
 
 

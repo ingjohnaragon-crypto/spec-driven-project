@@ -67,9 +67,11 @@ requests.get("https://...")
 socket.connect(...)
 ```
 
-**No exception chaining:**
+**No `raise` at all — the sandbox has no exception classes:**
 ```python
-raise ValueError("msg") from original_error   # FORBIDDEN
+raise ValueError("msg")                        # FORBIDDEN → "Unsupported builtin used"
+raise Exception("msg") from original_error      # FORBIDDEN
+assert condition, "msg"                         # ✅ the only way to abort a hook
 ```
 
 ---
@@ -267,8 +269,8 @@ opt_maturity = vault.get_parameter_timeseries(name="maturity_date").latest()
 if opt_maturity.is_set():
     maturity_date  = opt_maturity.value          # datetime
     effective_date = hook_arguments.effective_datetime.date()   # date
-    if maturity_date.date() <= effective_date:   # date <= date ✅
-        raise ValueError("maturity_date must be in the future.")
+    assert maturity_date.date() > effective_date, \
+        "maturity_date must be in the future."   # assert, NOT raise (§ Validación)
 
 # In tests — ALWAYS pass datetime, never date, to OptionalValue
 maturity_val = OptionalValue(datetime(2025, 6, 30, tzinfo=UTC))   # ✅

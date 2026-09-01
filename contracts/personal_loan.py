@@ -159,8 +159,9 @@ def _build_amortization_schedule(
     term_months: int,
 ) -> list:
     """Annuity schedule. annual_rate is a fraction (0.12 = 12%)."""
-    if term_months <= 0:
-        raise ValueError("term_months must be > 0")
+    # Vault's sandbox blocks `raise ValueError(...)` ("Unsupported builtin
+    # used"); validate with assert (see vault-core-api-gotchas §3.5).
+    assert term_months > 0, "term_months must be > 0"
 
     principal = Decimal(principal)
     annual_rate = Decimal(annual_rate)
@@ -300,10 +301,8 @@ def activation_hook(
     denomination = _param(vault, "denomination")
     repayment_day = int(_param(vault, "repayment_day"))
 
-    if principal <= Decimal("0"):
-        raise ValueError("principal must be greater than zero.")
-    if term_months < 1:
-        raise ValueError("term_months must be at least 1.")
+    assert principal > Decimal("0"), "principal must be greater than zero."
+    assert term_months >= 1, "term_months must be at least 1."
 
     start_dt = hook_arguments.effective_datetime
     monthly_schedule = ScheduledEvent(

@@ -200,13 +200,15 @@ def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
     opt_maturity   = vault.get_parameter_timeseries(name="maturity_date").latest()
-    if not opt_maturity.is_set():
-        raise ValueError("maturity_date is required for a Fixed-Term Deposit.")
+    # The Vault sandbox blocks `raise ValueError(...)` ("Unsupported builtin
+    # used"); validate with assert instead (see vault-core-api-gotchas §3.5).
+    assert opt_maturity.is_set(), "maturity_date is required for a Fixed-Term Deposit."
     maturity_date  = opt_maturity.value
     effective_date = hook_arguments.effective_datetime.date()
 
-    if maturity_date.date() <= effective_date:
-        raise ValueError("maturity_date must be strictly in the future.")
+    assert maturity_date.date() > effective_date, (
+        "maturity_date must be strictly in the future."
+    )
 
     start_dt = hook_arguments.effective_datetime
 

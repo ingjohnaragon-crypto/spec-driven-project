@@ -238,18 +238,15 @@ def _validate_parameters(
     minimum_balance: Decimal,
     minimum_savings: Decimal,
 ) -> None:
-    if denomination not in supported_denominations:
-        raise ValueError("Invalid account parameters.")
-    if daily_limit < Decimal("0"):
-        raise ValueError("Invalid account parameters.")
-    if minimum_balance < Decimal("0") or minimum_savings < Decimal("0"):
-        raise ValueError("Invalid account parameters.")
-    if standard_rate < Decimal("0") or standard_rate > Decimal("1"):
-        raise ValueError("Invalid account parameters.")
-    if bonus_rate < Decimal("0") or bonus_rate > Decimal("1"):
-        raise ValueError("Invalid account parameters.")
-    if bonus_rate < standard_rate:
-        raise ValueError("Invalid account parameters.")
+    # Vault's sandbox blocks `raise ValueError(...)` ("Unsupported builtin
+    # used"); validate with assert (see vault-core-api-gotchas §3.5).
+    msg = "Invalid account parameters."
+    assert denomination in supported_denominations, msg
+    assert daily_limit >= Decimal("0"), msg
+    assert minimum_balance >= Decimal("0") and minimum_savings >= Decimal("0"), msg
+    assert Decimal("0") <= standard_rate <= Decimal("1"), msg
+    assert Decimal("0") <= bonus_rate <= Decimal("1"), msg
+    assert bonus_rate >= standard_rate, msg
 
 
 @requires(parameters=True)
