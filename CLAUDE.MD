@@ -172,7 +172,7 @@ import os, sys, json, re, math, datetime, collections  # ninguna stdlib
 eval(), exec(), __import__(), globals(), locals()
 print(), open(), input()
 getattr(), setattr(), type(), dir()
-raise X from Y
+raise ValueError(...), raise Exception(...), raise X from Y   # ninguna excepción
 GLOBAL_MUTABLE = {}  # no estado global mutable
 requests.get()       # no red
 float(), 1.5          # nada de float — Decimal siempre
@@ -185,7 +185,16 @@ from zoneinfo import ZoneInfo                # para datetimes UTC
 from contracts_api import (...)              # único módulo de dominio
 str, int, list, dict, sorted(), sum()        # built-ins básicos
 hook_arguments.effective_datetime            # así se obtiene la fecha
+assert condicion, "mensaje"                  # única forma de abortar un hook
 ```
+
+### Validación en hooks: `assert`, nunca `raise`
+
+`raise ValueError(...)` (o cualquier excepción) → `InvalidSmartContractError:
+"Unsupported builtin used"` en runtime — el sandbox no expone clases de
+excepción. Los tests mockeados NO lo ven. Usar `assert <condición>, "mensaje"`
+(el `AssertionError` se propaga con el mensaje intacto). `vault_lint.py` lo
+verifica: regla `RAISE_STATEMENT`. Detalle: `vault-core-api-gotchas.md` §3.5.
 
 ### Cambios críticos API 4.0 vs 3.x
 

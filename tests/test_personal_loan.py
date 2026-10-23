@@ -6,6 +6,8 @@ from decimal import Decimal
 from unittest.mock import MagicMock
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from contracts_api import (
     ActivationHookArguments,
     Balance,
@@ -203,20 +205,14 @@ class TestActivationHook:
     def test_activation_rejects_non_positive_principal(self):
         vault = make_vault(principal=Decimal("0"))
         args = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
-        try:
+        with pytest.raises(AssertionError, match="principal"):
             contract.activation_hook(vault, args)
-            raise AssertionError("expected ValueError")
-        except ValueError as exc:
-            assert "principal" in str(exc)
 
     def test_activation_rejects_invalid_term(self):
         vault = make_vault(term_months=Decimal("0"))
         args = ActivationHookArguments(effective_datetime=ACTIVATION_DATE)
-        try:
+        with pytest.raises(AssertionError, match="term_months"):
             contract.activation_hook(vault, args)
-            raise AssertionError("expected ValueError")
-        except ValueError as exc:
-            assert "term_months" in str(exc)
 
 
 # ── Scheduled monthly repayment ────────────────────────────────────────────────

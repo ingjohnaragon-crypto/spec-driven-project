@@ -270,8 +270,9 @@ def activation_hook(
     vault, hook_arguments: ActivationHookArguments
 ) -> ActivationHookResult:
     dia_cobro = int(_parametro(vault, "dia_cobro_comision"))
-    if dia_cobro < 1 or dia_cobro > 28:
-        raise ValueError("dia_cobro_comision debe estar entre 1 y 28.")
+    # El sandbox de Vault bloquea `raise ValueError(...)` ("Unsupported builtin
+    # used"); la validación se hace con assert (ver vault-core-api-gotchas §3.5).
+    assert 1 <= dia_cobro <= 28, "dia_cobro_comision debe estar entre 1 y 28."
     # Saldo inicial cero: la activación no emite ningún posting, solo agenda el
     # evento mensual de cobro de la comisión de mantenimiento.
     return ActivationHookResult(

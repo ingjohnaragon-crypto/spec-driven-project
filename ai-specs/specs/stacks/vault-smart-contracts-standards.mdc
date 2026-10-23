@@ -26,8 +26,9 @@ CACHE = {}  # state is lost between hook calls anyway
 # No network
 requests.get(), socket.connect()
 
-# No exception chaining
-raise X from Y
+# No raise — the sandbox exposes no exception classes ("Unsupported builtin used")
+raise ValueError(...), raise Exception(...), raise X from Y
+# validate with: assert <condition>, "message"
 ```
 
 ### Allowed

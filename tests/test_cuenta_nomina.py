@@ -167,14 +167,14 @@ class TestActivationHook:
         assert schedule.start_datetime == ACTIVACION
 
     def test_activacion_rechaza_dia_fuera_de_rango_bajo(self):
-        with pytest.raises(ValueError, match="entre 1 y 28"):
+        with pytest.raises(AssertionError, match="entre 1 y 28"):
             contrato.activation_hook(
                 crear_vault(dia_cobro=Decimal("0")),
                 ActivationHookArguments(effective_datetime=ACTIVACION),
             )
 
     def test_activacion_rechaza_dia_fuera_de_rango_alto(self):
-        with pytest.raises(ValueError, match="entre 1 y 28"):
+        with pytest.raises(AssertionError, match="entre 1 y 28"):
             contrato.activation_hook(
                 crear_vault(dia_cobro=Decimal("29")),
                 ActivationHookArguments(effective_datetime=ACTIVACION),

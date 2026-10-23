@@ -40,6 +40,7 @@ DISPLAY_RULES: tuple[tuple[str, frozenset[str]], ...] = (
     ("No stdlib imports detected", frozenset({"FORBIDDEN_IMPORT", "UNKNOWN_IMPORT"})),
     ("No eval/exec/globals/locals", frozenset({"FORBIDDEN_CALL", "EXCEPTION_CHAINING"})),
     ("No mutable global state", frozenset({"MUTABLE_GLOBAL"})),
+    ("No raise (use assert instead)", frozenset({"RAISE_STATEMENT"})),
     ("Decimal used (not float)", frozenset({"FLOAT_USED"})),
     ("ZoneInfo used (not timezone.utc)", frozenset({"TIMEZONE_UTC"})),
     ("No client_transaction_id", frozenset({"CLIENT_TRANSACTION_ID"})),
@@ -249,7 +250,24 @@ class VaultLintVisitor(ast.NodeVisitor):
                 "EXCEPTION_CHAINING",
                 "'raise ... from ...' is not allowed in contracts",
             )
+        if node.exc is not None:
+            self._add(
+                node,
+                "RAISE_STATEMENT",
+                f"raising {self._exc_name(node.exc)} is blocked by the Vault "
+                "sandbox ('Unsupported builtin used' at runtime) — validate with "
+                "'assert <condition>, \"message\"' instead",
+            )
         self.generic_visit(node)
+
+    @staticmethod
+    def _exc_name(exc: ast.expr) -> str:
+        target = exc.func if isinstance(exc, ast.Call) else exc
+        if isinstance(target, ast.Name):
+            return repr(target.id)
+        if isinstance(target, ast.Attribute):
+            return repr(target.attr)
+        return "an exception"
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         prev = self._in_function

@@ -190,6 +190,56 @@ no cambia (1000 → 996.16 en DEFAULT + 3.84 en ACCRUED_INTEREST). Falta un paso
 interés" con la pata contra una cuenta de gasto/ingreso del banco. Es un bug de
 modelado del contrato, no de integración.
 
+## 3.4 Sembrar saldo dentro de `simulate` (sesión 2026-08-31)
+
+Para que un `scheduled_event_hook` que depende del saldo (comisión, interés) haga
+algo en la simulación, la cuenta necesita fondos. En este sandbox:
+
+- `inbound_hard_settlement` dentro de `create_posting_instruction_batch` exige
+  `target_account: {"account_id": "..."}` (objeto), **no** `target_account_id`
+  (ese es output-only: `"output_only field target_account_id should not be set"`).
+- El `internal_account_id` de la pata contraria **no puede** ser una internal
+  account real del instance (`/v1/internal-accounts`): la simulación está aislada
+  y responde `404 failed to get accounts resource_ids:["1"]`.
+- Tampoco existe una instrucción `create_internal_account` en `/v1/contracts:simulate`
+  (`"instruction ... is of unknown type"`), ni un campo top-level `internal_accounts`
+  / `internal_account_ids`.
+- **Lo que funciona**: abrir una segunda cuenta normal con el mismo
+  `product_version_id` y usar su id como `internal_account_id`. La pata contra esa
+  cuenta la deja en negativo sin disparar su `pre_posting_hook` (se trata como
+  pata interna). `os-vault-simulate --deposit N` hace exactamente esto: abre
+  `openspec-sim-contra`, hace el settlement y filtra esa cuenta del log.
+- Forma de la respuesta con movimiento: cada `result` trae
+  `posting_instruction_batches[].posting_instructions[]` con `committed_postings`
+  (`credit`, `amount`, `account_address`, `phase`) y `balances`
+  `{account_id: {"balances": [{account_address, phase, denomination, amount}]}}`
+  donde `amount` es el **saldo corrido** de esa dirección (no el delta).
+- `outputs: ["ACCOUNT_BALANCE", ...]` provoca `proto: syntax error ... unexpected
+  token` — ese campo no aplica a esta versión del endpoint; los balances vienen
+  siempre en cada `result`.
+
+## 3.5 `raise` está prohibido en el sandbox — usar `assert` (sesión 2026-08-31)
+
+Descubierto al pasar los 5 contratos por `os-vault-simulate --deposit`:
+`fixed_term_deposit` y `cuenta_joven` fallaban con
+`InvalidSmartContractError: Unsupported builtin used` cuando se ejecutaba un
+`raise ValueError(...)` de validación en `activation_hook`.
+
+- `ValueError`, `Exception` y cualquier clase de excepción **no** están en
+  `ALLOWED_BUILTINS` del executor (`contracts_sdk/.../version_400/common/lib.py`):
+  el `raise` se resuelve a `_builtin_not_supported()` → `InvalidSmartContractError`
+  y el mensaje original se pierde.
+- API 4.0 tampoco expone ninguna excepción lanzable desde `contracts_api`
+  (solo `Rejection`, y solo como valor de retorno de `pre_posting_hook` /
+  `post_posting_hook`, nunca en `activation_hook` / `scheduled_event_hook`).
+- **Lo que funciona**: `assert <condición>, "mensaje"`. Verificado en `simulate`:
+  el `AssertionError` se propaga con `exception_type: "AssertionError"` y el
+  mensaje intacto. Regla: invertir la condición del `if ...: raise` a un
+  `assert`. Los 5 contratos y sus tests quedaron así.
+- Los tests unitarios mockeados **no** lo detectan (ejecutan Python normal, el
+  `raise ValueError` funciona). `vault_lint.py` ahora tiene la regla
+  `RAISE_STATEMENT` que marca cualquier `raise <Excepción>` en un contrato.
+
 ## 4. Endpoints que SÍ funcionan pese al problema de streaming
 
 `/v1/product-versions`, `/v1/customers`, `/v1/product-versions:batchGet` no son streaming y no se ven afectados por la inspección TLS — se puede seguir trabajando en deploy/customer/account mientras se espera la aprobación de red para simulate.

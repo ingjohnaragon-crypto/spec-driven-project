@@ -166,14 +166,14 @@ class TestActivacion:
                 }[name]
             )
         )
-        with pytest.raises(ValueError, match="Invalid account parameters"):
+        with pytest.raises(AssertionError, match="Invalid account parameters"):
             contrato.activation_hook(
                 vault, ActivationHookArguments(effective_datetime=ACTIVACION)
             )
 
     def test_rechaza_bonificacion_menor_que_estandar(self):
         vault = crear_vault(tasa_estandar=Decimal("0.05"), tasa_bonificada=Decimal("0.02"))
-        with pytest.raises(ValueError, match="Invalid account parameters"):
+        with pytest.raises(AssertionError, match="Invalid account parameters"):
             contrato.activation_hook(
                 vault, ActivationHookArguments(effective_datetime=ACTIVACION)
             )

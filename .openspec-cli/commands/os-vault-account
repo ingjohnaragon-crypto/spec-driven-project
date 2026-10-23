@@ -3,7 +3,12 @@
 # v5: vuelve a instance_param_vals (nombre original, anidado dentro de
 #     "account"), pero ahora con TODOS los parametros INSTANCE requeridos,
 #     no solo denomination como en el intento original.
+# v6: si se pasa instance_params_json, se usa TAL CUAL (sin inyectar la clave
+#     'denomination') — necesario para contratos cuyo parametro se llama distinto
+#     (p. ej. cuenta_nomina usa 'denominacion' en espanol).
 # Usage: os-vault-account <product_version_id> <customer_id> [denomination] [instance_params_json]
+#   os-vault-account 9660 <cust>                       # denomination=GBP auto
+#   os-vault-account 9703 <cust> COP '{"denominacion":"COP"}'   # clave en espanol
 
 set -euo pipefail
 
@@ -54,8 +59,13 @@ customer_id = sys.argv[2]
 denomination = sys.argv[3]
 instance_params = json.loads(sys.argv[4])
 
-instance_param_vals = {'denomination': denomination}
-instance_param_vals.update({k: str(v) for k, v in instance_params.items()})
+# Si el caller da instance_params, es la fuente de verdad completa (nombres de
+# parametro tal cual los declara el contrato). Solo cuando no da nada asumimos
+# el contrato de KAN-12 con un unico INSTANCE llamado 'denomination'.
+if instance_params:
+    instance_param_vals = {k: str(v) for k, v in instance_params.items()}
+else:
+    instance_param_vals = {'denomination': denomination}
 
 payload = {
     'request_id': str(uuid.uuid4()),

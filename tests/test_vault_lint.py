@@ -127,8 +127,15 @@ def test_should_fail_when_contract_uses_raise_from(tmp_path: Path) -> None:
         "    raise ValueError('msg') from e\n"
     )
     violations = lint_source(tmp_path, code)
+    rules = {v.rule for v in violations}
+    assert rules == {"EXCEPTION_CHAINING", "RAISE_STATEMENT"}
+
+
+def test_should_fail_when_contract_raises_exception(tmp_path: Path) -> None:
+    violations = lint_source(tmp_path, "def f():\n    raise ValueError('bad')\n")
     assert len(violations) == 1
-    assert violations[0].rule == "EXCEPTION_CHAINING"
+    assert violations[0].rule == "RAISE_STATEMENT"
+    assert "assert" in violations[0].message
 
 
 # ── Mutable global state ──────────────────────────────────────
@@ -401,7 +408,7 @@ def test_main_should_return_0_when_no_violations(tmp_path: Path, capsys) -> None
     out = capsys.readouterr().out
     assert "Checking Vault sandbox restrictions..." in out
     assert "✔ No stdlib imports detected" in out
-    assert "✔ 9/9 Vault rules — CLEAN" in out
+    assert "✔ 10/10 Vault rules — CLEAN" in out
 
 
 def test_main_should_return_1_when_violations_found(tmp_path: Path, capsys) -> None:
